@@ -1,0 +1,16 @@
+services:
+  my-finance-system:
+    build:
+      context: ./my-finance-system
+    container_name: my-finance-system
+    environment:
+      DATABASE_URL: file:/data/finance.db
+      NODE_ENV: production
+    ports:
+      - "3001:3000"
+    volumes:
+      - my-finance-data:/data
+    restart: unless-stopped
+
+volumes:
+  my-finance-data:

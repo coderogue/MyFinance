@@ -93,7 +93,19 @@ The compose setup creates a Docker volume named `my-finance-data` and sets:
 DATABASE_URL=file:/data/finance.db
 ```
 
-The current prototype is still mostly local React state, but the volume is ready for SQLite persistence when database writes are wired in.
+Workbook data is persisted to SQLite through `app/api/workbook-state`.
+The app saves a workbook snapshot after edits and reloads it on startup.
+
+For local development, `.env` and `.env.local` point Prisma to:
+
+```text
+DATABASE_URL=file:./dev.db
+```
+
+That creates `prisma/dev.db`, which is ignored by git. In Docker, records are
+kept in the `my-finance-data` volume, so they survive container rebuilds and
+restarts. Do not run `docker compose down -v` unless you intentionally want to
+delete the saved database volume.
 
 ## Core Product
 

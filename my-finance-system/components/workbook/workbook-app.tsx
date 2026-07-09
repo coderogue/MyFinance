@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getWorkbookTabGroups,
   userTabCategories,
@@ -46,6 +46,12 @@ interface WorkbookYearState {
   transactions: Record<string, TransactionEntry[]>;
 }
 
+interface PersistedWorkbookState {
+  activeYear: number;
+  workbookYears: number[];
+  yearStates: Record<number, WorkbookYearState>;
+}
+
 export function WorkbookApp() {
   const [tabs, setTabs] = useState<WorkbookTab[]>(workbookTabs);
   const [fixedExpenseRows, setFixedExpenseRows] = useState<FixedExpenseRow[]>([]);
@@ -68,11 +74,18 @@ export function WorkbookApp() {
   >({});
   const [transactionDescription, setTransactionDescription] = useState("");
   const [transactionAmount, setTransactionAmount] = useState("");
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(
+    null
+  );
+  const [editingTransactionDescription, setEditingTransactionDescription] =
+    useState("");
+  const [editingTransactionAmount, setEditingTransactionAmount] = useState("");
   const [activeYear, setActiveYear] = useState(DEFAULT_WORKBOOK_YEAR);
   const [workbookYears, setWorkbookYears] = useState([DEFAULT_WORKBOOK_YEAR]);
   const [yearStates, setYearStates] = useState<
     Record<number, WorkbookYearState>
   >({});
+  const [hasLoadedWorkbookState, setHasLoadedWorkbookState] = useState(false);
   const [selectedTabId, setSelectedTabId] = useState("summary");
   const [isAddingTab, setIsAddingTab] = useState(false);
   const [isRenamingTab, setIsRenamingTab] = useState(false);
@@ -140,12 +153,105 @@ export function WorkbookApp() {
     setTransactionCell(null);
     setTransactionDescription("");
     setTransactionAmount("");
+    cancelTransactionEdit();
     setIsAddingTab(false);
     setIsRenamingTab(false);
     setTabName("");
     setRenameTabName("");
     setCategory("Bank");
   }
+
+  useEffect(() => {
+    let didCancel = false;
+
+    async function loadPersistedWorkbookState() {
+      try {
+        const response = await fetch("/api/workbook-state", {
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to load saved workbook state.");
+        }
+
+        const result = (await response.json()) as {
+          data: PersistedWorkbookState | null;
+        };
+
+        if (didCancel || !result.data) {
+          return;
+        }
+
+        const nextActiveYear = result.data.activeYear;
+        const nextYearStates = result.data.yearStates ?? {};
+        const nextWorkbookYears =
+          result.data.workbookYears?.length > 0
+            ? result.data.workbookYears
+            : [nextActiveYear];
+
+        setActiveYear(nextActiveYear);
+        setWorkbookYears(nextWorkbookYears);
+        setYearStates(nextYearStates);
+        loadWorkbookYearState(nextYearStates[nextActiveYear]);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (!didCancel) {
+          setHasLoadedWorkbookState(true);
+        }
+      }
+    }
+
+    void loadPersistedWorkbookState();
+
+    return () => {
+      didCancel = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedWorkbookState) {
+      return;
+    }
+
+    const saveTimeout = window.setTimeout(() => {
+      const nextYearStates = {
+        ...yearStates,
+        [activeYear]: getCurrentWorkbookYearState()
+      };
+      const payload: PersistedWorkbookState = {
+        activeYear,
+        workbookYears,
+        yearStates: nextYearStates
+      };
+
+      void fetch("/api/workbook-state", {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "PUT"
+      }).catch((error) => console.error(error));
+    }, 600);
+
+    return () => window.clearTimeout(saveTimeout);
+  }, [
+    activeYear,
+    cellValues,
+    fixedExpenseRows,
+    fixedExpenseSubRows,
+    hasLoadedWorkbookState,
+    presetRows,
+    selectedTabId,
+    stockDividends,
+    stockPrices,
+    stockRows,
+    stockTransactions,
+    tabs,
+    transactions,
+    workbookYears,
+    yearStates
+  ]);
 
   function switchWorkbookYear(year: number) {
     if (year === activeYear) {
@@ -426,6 +532,12 @@ export function WorkbookApp() {
     ]);
   }
 
+  function updateStockTransaction(input: StockTransactionEntry) {
+    setStockTransactions((currentRows) =>
+      currentRows.map((row) => (row.id === input.id ? input : row))
+    );
+  }
+
   function addStockPrice(input: Omit<StockPriceEntry, "id">) {
     setStockPrices((currentRows) => [
       ...currentRows,
@@ -499,6 +611,20 @@ export function WorkbookApp() {
     return `${input.tableId}:${input.rowIndex}:${input.columnIndex}`;
   }
 
+  function openTransactionCell(input: TransactionCell) {
+    setTransactionCell(input);
+    setTransactionDescription("");
+    setTransactionAmount("");
+    cancelTransactionEdit();
+  }
+
+  function closeTransactionCell() {
+    setTransactionCell(null);
+    setTransactionDescription("");
+    setTransactionAmount("");
+    cancelTransactionEdit();
+  }
+
   function formatAmount(value: string) {
     const parsed = Number(value.replace(/,/g, "").trim());
     return Number.isFinite(parsed)
@@ -507,6 +633,18 @@ export function WorkbookApp() {
           minimumFractionDigits: 2
         })
       : "";
+  }
+
+  function updateTransactionCellTotal(key: string, rows: TransactionEntry[]) {
+    const total = rows.reduce(
+      (sum, row) => sum + Number(row.amount.replace(/,/g, "")),
+      0
+    );
+
+    setCellValues((currentValues) => ({
+      ...currentValues,
+      [key]: rows.length > 0 ? formatAmountTotal(total) : ""
+    }));
   }
 
   function addTransaction() {
@@ -530,18 +668,7 @@ export function WorkbookApp() {
 
     setTransactions((currentTransactions) => {
       const nextRows = [...(currentTransactions[key] ?? []), nextTransaction];
-      const total = nextRows.reduce(
-        (sum, row) => sum + Number(row.amount.replace(/,/g, "")),
-        0
-      );
-
-      setCellValues((currentValues) => ({
-        ...currentValues,
-        [key]: total.toLocaleString("en-US", {
-          maximumFractionDigits: 2,
-          minimumFractionDigits: 2
-        })
-      }));
+      updateTransactionCellTotal(key, nextRows);
 
       return {
         ...currentTransactions,
@@ -551,6 +678,52 @@ export function WorkbookApp() {
 
     setTransactionDescription("");
     setTransactionAmount("");
+  }
+
+  function startTransactionEdit(row: TransactionEntry) {
+    setEditingTransactionId(row.id);
+    setEditingTransactionDescription(row.description);
+    setEditingTransactionAmount(row.amount);
+  }
+
+  function cancelTransactionEdit() {
+    setEditingTransactionId(null);
+    setEditingTransactionDescription("");
+    setEditingTransactionAmount("");
+  }
+
+  function saveTransactionEdit() {
+    if (!transactionCell || !editingTransactionId) {
+      return;
+    }
+
+    const cleanDescription = editingTransactionDescription.trim();
+    const cleanAmount = formatAmount(editingTransactionAmount);
+
+    if (!cleanDescription || !cleanAmount) {
+      return;
+    }
+
+    const key = cellKey(transactionCell);
+
+    setTransactions((currentTransactions) => {
+      const nextRows = (currentTransactions[key] ?? []).map((row) =>
+        row.id === editingTransactionId
+          ? {
+              ...row,
+              amount: cleanAmount,
+              description: cleanDescription
+            }
+          : row
+      );
+      updateTransactionCellTotal(key, nextRows);
+
+      return {
+        ...currentTransactions,
+        [key]: nextRows
+      };
+    });
+    cancelTransactionEdit();
   }
 
   return (
@@ -754,7 +927,7 @@ export function WorkbookApp() {
                 fixedExpenseSubRows={fixedExpenseSubRows}
                 name={selectedTab.name}
                 onCellChange={updateCell}
-                onTransactionCellOpen={setTransactionCell}
+                onTransactionCellOpen={openTransactionCell}
                 onAddFixedExpense={addFixedExpense}
                 onAddFixedExpenseSubRow={addFixedExpenseSubRow}
                 tabId={selectedTab.id}
@@ -768,6 +941,7 @@ export function WorkbookApp() {
                 onAddStockPrice={addStockPrice}
                 onAddStock={addStock}
                 onAddStockTransaction={addStockTransaction}
+                onUpdateStockTransaction={updateStockTransaction}
                 stocks={stockRows}
                 stockDividends={stockDividends}
                 stockPrices={stockPrices}
@@ -779,7 +953,7 @@ export function WorkbookApp() {
                 category={selectedTab.category}
                 name={selectedTab.name}
                 onCellChange={updateCell}
-                onTransactionCellOpen={setTransactionCell}
+                onTransactionCellOpen={openTransactionCell}
                 normalTabs={normalTabs}
                 onAddPreset={addPreset}
                 presetRows={presetRows}
@@ -800,7 +974,7 @@ export function WorkbookApp() {
                 </div>
                 <button
                   className="border border-slate-300 px-2 py-1 text-sm"
-                  onClick={() => setTransactionCell(null)}
+                  onClick={closeTransactionCell}
                 >
                   Close
                 </button>
@@ -840,16 +1014,67 @@ export function WorkbookApp() {
                       <th className="border border-slate-200 px-2 py-2 text-right">
                         Amount
                       </th>
+                      <th className="border border-slate-200 px-2 py-2 text-left">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {(transactions[cellKey(transactionCell)] ?? []).map((row) => (
                       <tr key={row.id}>
                         <td className="border border-slate-200 px-2 py-2">
-                          {row.description}
+                          {editingTransactionId === row.id ? (
+                            <input
+                              className="w-full border border-slate-300 px-2 py-1"
+                              onChange={(event) =>
+                                setEditingTransactionDescription(
+                                  event.target.value
+                                )
+                              }
+                              value={editingTransactionDescription}
+                            />
+                          ) : (
+                            row.description
+                          )}
                         </td>
                         <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-                          {row.amount}
+                          {editingTransactionId === row.id ? (
+                            <input
+                              className="w-full border border-slate-300 px-2 py-1 text-right"
+                              inputMode="decimal"
+                              onChange={(event) =>
+                                setEditingTransactionAmount(event.target.value)
+                              }
+                              value={editingTransactionAmount}
+                            />
+                          ) : (
+                            row.amount
+                          )}
+                        </td>
+                        <td className="border border-slate-200 px-2 py-2">
+                          {editingTransactionId === row.id ? (
+                            <div className="flex gap-2">
+                              <button
+                                className="border border-slate-950 bg-slate-950 px-2 py-1 text-xs text-white"
+                                onClick={saveTransactionEdit}
+                              >
+                                Save
+                              </button>
+                              <button
+                                className="border border-slate-300 px-2 py-1 text-xs"
+                                onClick={cancelTransactionEdit}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              className="border border-slate-300 px-2 py-1 text-xs"
+                              onClick={() => startTransactionEdit(row)}
+                            >
+                              Edit
+                            </button>
+                          )}
                         </td>
                       </tr>
                     ))}

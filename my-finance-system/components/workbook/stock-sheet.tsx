@@ -45,6 +45,7 @@ export function StockSheet({
   onAddStockPrice,
   onAddStock,
   onAddStockTransaction,
+  onUpdateStockTransaction,
   stocks,
   stockDividends,
   stockPrices,
@@ -57,6 +58,7 @@ export function StockSheet({
   onAddStockPrice: (input: Omit<StockPriceEntry, "id">) => void;
   onAddStock: (label: string) => void;
   onAddStockTransaction: (input: Omit<StockTransactionEntry, "id">) => void;
+  onUpdateStockTransaction: (input: StockTransactionEntry) => void;
   stocks: StockRow[];
   stockDividends: StockDividendEntry[];
   stockPrices: StockPriceEntry[];
@@ -70,6 +72,12 @@ export function StockSheet({
   const [price, setPrice] = useState("");
   const [dividendDate, setDividendDate] = useState("");
   const [dividendAmount, setDividendAmount] = useState("");
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(
+    null
+  );
+  const [editingTransactionDate, setEditingTransactionDate] = useState("");
+  const [editingQuantity, setEditingQuantity] = useState("");
+  const [editingPrice, setEditingPrice] = useState("");
   const instrumentLabel = category === "Managed Funds" ? "Managed Fund" : "Stock";
   const dividendLabel = category === "Managed Funds" ? "Distribution" : "Dividend";
   const tabStocks = stocks.filter((stock) => stock.tabId === tabId);
@@ -188,6 +196,39 @@ export function StockSheet({
     setPrice("");
     setDividendDate("");
     setDividendAmount("");
+    cancelTransactionEdit();
+  }
+
+  function startTransactionEdit(entry: StockTransactionEntry) {
+    setEditingTransactionId(entry.id);
+    setEditingTransactionDate(entry.date);
+    setEditingQuantity(entry.quantity);
+    setEditingPrice(entry.price);
+  }
+
+  function cancelTransactionEdit() {
+    setEditingTransactionId(null);
+    setEditingTransactionDate("");
+    setEditingQuantity("");
+    setEditingPrice("");
+  }
+
+  function saveTransactionEdit(entry: StockTransactionEntry) {
+    const cleanQuantity = formatNumber(editingQuantity);
+    const cleanPrice = formatNumber(editingPrice);
+
+    if (!cleanQuantity || !cleanPrice) {
+      return;
+    }
+
+    onUpdateStockTransaction({
+      ...entry,
+      date:
+        entry.columnIndex === OPENING_COLUMN ? "" : editingTransactionDate,
+      price: cleanPrice,
+      quantity: cleanQuantity
+    });
+    cancelTransactionEdit();
   }
 
   return (
@@ -356,7 +397,19 @@ export function StockSheet({
                 Add {instrumentLabel} Transaction
               </button>
               <PreviousStockTransactionEntries
+                editingEntry={{
+                  date: editingTransactionDate,
+                  id: editingTransactionId,
+                  price: editingPrice,
+                  quantity: editingQuantity
+                }}
                 entries={previousStockTransactions}
+                onCancelEdit={cancelTransactionEdit}
+                onChangeDate={setEditingTransactionDate}
+                onChangePrice={setEditingPrice}
+                onChangeQuantity={setEditingQuantity}
+                onSaveEdit={saveTransactionEdit}
+                onStartEdit={startTransactionEdit}
               />
             </div>
           ) : (
@@ -408,33 +461,113 @@ function PreviousPriceEntries({ entries }: { entries: StockPriceEntry[] }) {
 }
 
 function PreviousStockTransactionEntries({
-  entries
+  editingEntry,
+  entries,
+  onCancelEdit,
+  onChangeDate,
+  onChangePrice,
+  onChangeQuantity,
+  onSaveEdit,
+  onStartEdit
 }: {
+  editingEntry: {
+    date: string;
+    id: string | null;
+    price: string;
+    quantity: string;
+  };
   entries: StockTransactionEntry[];
+  onCancelEdit: () => void;
+  onChangeDate: (value: string) => void;
+  onChangePrice: (value: string) => void;
+  onChangeQuantity: (value: string) => void;
+  onSaveEdit: (entry: StockTransactionEntry) => void;
+  onStartEdit: (entry: StockTransactionEntry) => void;
 }) {
   return (
     <PreviousEntries title="Previous Stock Transactions">
       {entries.length > 0 ? (
-        entries.map((entry) => (
-          <tr key={entry.id}>
-            <td className="border border-slate-200 px-2 py-2">
-              {entry.date || "Opening"}
-            </td>
-            <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-              {entry.quantity}
-            </td>
-            <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-              {entry.price}
-            </td>
-            <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-              {formatNumber(
-                String(parseNumber(entry.quantity) * parseNumber(entry.price))
-              )}
-            </td>
-          </tr>
-        ))
+        entries.map((entry) => {
+          const isEditing = editingEntry.id === entry.id;
+
+          return (
+            <tr key={entry.id}>
+              <td className="border border-slate-200 px-2 py-2">
+                {isEditing && entry.columnIndex !== OPENING_COLUMN ? (
+                  <input
+                    className="w-full border border-slate-300 px-2 py-1"
+                    onChange={(event) => onChangeDate(event.target.value)}
+                    type="date"
+                    value={editingEntry.date}
+                  />
+                ) : (
+                  entry.date || "Opening"
+                )}
+              </td>
+              <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
+                {isEditing ? (
+                  <input
+                    className="w-full border border-slate-300 px-2 py-1 text-right"
+                    inputMode="decimal"
+                    onChange={(event) => onChangeQuantity(event.target.value)}
+                    value={editingEntry.quantity}
+                  />
+                ) : (
+                  entry.quantity
+                )}
+              </td>
+              <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
+                {isEditing ? (
+                  <input
+                    className="w-full border border-slate-300 px-2 py-1 text-right"
+                    inputMode="decimal"
+                    onChange={(event) => onChangePrice(event.target.value)}
+                    value={editingEntry.price}
+                  />
+                ) : (
+                  entry.price
+                )}
+              </td>
+              <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
+                {formatNumber(
+                  String(
+                    parseNumber(
+                      isEditing ? editingEntry.quantity : entry.quantity
+                    ) *
+                      parseNumber(isEditing ? editingEntry.price : entry.price)
+                  )
+                )}
+              </td>
+              <td className="border border-slate-200 px-2 py-2">
+                {isEditing ? (
+                  <div className="flex gap-2">
+                    <button
+                      className="border border-slate-950 bg-slate-950 px-2 py-1 text-xs text-white"
+                      onClick={() => onSaveEdit(entry)}
+                    >
+                      Save
+                    </button>
+                    <button
+                      className="border border-slate-300 px-2 py-1 text-xs"
+                      onClick={onCancelEdit}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="border border-slate-300 px-2 py-1 text-xs"
+                    onClick={() => onStartEdit(entry)}
+                  >
+                    Edit
+                  </button>
+                )}
+              </td>
+            </tr>
+          );
+        })
       ) : (
-        <EmptyPreviousEntries colSpan={4} />
+        <EmptyPreviousEntries colSpan={5} />
       )}
     </PreviousEntries>
   );
