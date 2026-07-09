@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model FinanceYear {
+  id        String   @id @default(cuid())
+  year      Int      @unique
+  status    String   @default("open")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tabs               FinanceTab[]
+  normalSummaries    NormalTabMonthSummary[]
+  creditCardSummaries CreditCardMonthSummary[]
+  monthCloses        MonthClose[]
+  yearCloseSnapshot  YearCloseSnapshot?
+}
+
+model FinanceTab {
+  id             String   @id @default(cuid())
+  financeYearId  String
+  name           String
+  category       String
+  kind           String
+  openingBalance Decimal  @default(0)
+  isSystem       Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  financeYear          FinanceYear              @relation(fields: [financeYearId], references: [id])
+  lineItems            TabLineItem[]
+  transactions         Transaction[]
+  normalSummaries      NormalTabMonthSummary[]
+  creditCardSummaries  CreditCardMonthSummary[]
+  yearCloseBalances    YearCloseSnapshotBalance[]
+
+  @@unique([financeYearId, name])
+}
+
+model NormalTabMonthSummary {
+  id             String   @id @default(cuid())
+  financeYearId  String
+  tabId          String
+  month          Int
+  broughtForward Decimal
+  totalDebit     Decimal  @default(0)
+  totalCredit    Decimal  @default(0)
+  totalBalance   Decimal
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  financeYear FinanceYear @relation(fields: [financeYearId], references: [id])
+  tab         FinanceTab  @relation(fields: [tabId], references: [id])
+
+  @@unique([tabId, month])
+}
+
+model CreditCardMonthSummary {
+  id               String   @id @default(cuid())
+  financeYearId    String
+  tabId            String
+  month            Int
+  fixedExpenses    Decimal  @default(0)
+  variableExpenses Decimal  @default(0)
+  broughtForward   Decimal  @default(0)
+  rebate           Decimal  @default(0)
+  monthlyTotal     Decimal
+  statementAmount  Decimal  @default(0)
+  carriedForward   Decimal
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  financeYear FinanceYear @relation(fields: [financeYearId], references: [id])
+  tab         FinanceTab  @relation(fields: [tabId], references: [id])
+
+  @@unique([tabId, month])
+}
+
+model TabLineItem {
+  id         String   @id @default(cuid())
+  tabId      String
+  tableType  String
+  lineType   String
+  label      String
+  dayOfMonth Int?
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tab                 FinanceTab              @relation(fields: [tabId], references: [id])
+  monthlyValues       TabLineMonthlyValue[]
+  transactions        Transaction[]
+  fixedExpenseDetails FixedExpenseSubTable[]
+}
+
+model TabLineMonthlyValue {
+  id              String   @id @default(cuid())
+  lineItemId      String
+  year            Int
+  month           Int
+  projectedAmount Decimal  @default(0)
+  actualAmount    Decimal?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  lineItem TabLineItem @relation(fields: [lineItemId], references: [id])
+
+  @@unique([lineItemId, year, month])
+}
+
+model Transaction {
+  id                  String   @id @default(cuid())
+  tabId               String
+  lineItemId          String
+  linkedTransactionId String?
+  date                DateTime
+  amount              Decimal
+  kind                String
+  description         String
+  category            String?
+  note                String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tab      FinanceTab  @relation(fields: [tabId], references: [id])
+  lineItem TabLineItem @relation(fields: [lineItemId], references: [id])
+}
+
+model FixedExpenseSubTable {
+  id          String   @id @default(cuid())
+  lineItemId  String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lineItem TabLineItem                  @relation(fields: [lineItemId], references: [id])
+  entries  FixedExpenseSubTableEntry[]
+}
+
+model FixedExpenseSubTableEntry {
+  id          String   @id @default(cuid())
+  subTableId  String
+  date        DateTime
+  amount      Decimal
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subTable FixedExpenseSubTable @relation(fields: [subTableId], references: [id])
+}
+
+model MonthClose {
+  id            String   @id @default(cuid())
+  financeYearId String
+  month         Int
+  closedAt      DateTime @default(now())
+  notes         String?
+
+  financeYear FinanceYear @relation(fields: [financeYearId], references: [id])
+
+  @@unique([financeYearId, month])
+}
+
+model YearCloseSnapshot {
+  id            String   @id @default(cuid())
+  financeYearId String   @unique
+  year          Int
+  closedAt      DateTime @default(now())
+  notes         String?
+
+  financeYear FinanceYear               @relation(fields: [financeYearId], references: [id])
+  balances    YearCloseSnapshotBalance[]
+}
+
+model YearCloseSnapshotBalance {
+  id            String  @id @default(cuid())
+  snapshotId    String
+  tabId         String
+  tabName       String
+  category      String
+  closingAmount Decimal
+
+  snapshot YearCloseSnapshot @relation(fields: [snapshotId], references: [id])
+  tab      FinanceTab        @relation(fields: [tabId], references: [id])
+}
