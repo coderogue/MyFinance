@@ -61,6 +61,40 @@ prisma/               Database schema
 - `docs/data-model.md`
 - `docs/forecast-rules.md`
 
+## Docker Deployment
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+Then open:
+
+```text
+http://localhost:3000
+```
+
+To run in the background:
+
+```bash
+docker compose up --build -d
+```
+
+To stop:
+
+```bash
+docker compose down
+```
+
+The compose setup creates a Docker volume named `my-finance-data` and sets:
+
+```text
+DATABASE_URL=file:/data/finance.db
+```
+
+The current prototype is still mostly local React state, but the volume is ready for SQLite persistence when database writes are wired in.
+
 ## Core Product
 
 This is not a normal ledger-first app. It is an Excel-style annual workbook with better interactions.

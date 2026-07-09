@@ -696,6 +696,20 @@ In the initial empty workbook, the Summary tab should display only the summary t
 
 The system is yearly.
 
+The default workbook year is 2026.
+
+The Create Year action should create the next yearly workbook set.
+
+Example:
+
+```text
+Default year = 2026
+Click Create Year
+New active workbook year = 2027
+```
+
+Each created year should maintain its own workbook state, including tabs, rows, cell values, transaction records, stock or managed fund records, and credit card data.
+
 Each year has:
 
 - Opening Balance

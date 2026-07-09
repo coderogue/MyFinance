@@ -1,0 +1,14 @@
+.next
+node_modules
+out
+dist
+.env
+.env.local
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+*.tsbuildinfo
+npm-debug.log*
+Dockerfile
+.dockerignore

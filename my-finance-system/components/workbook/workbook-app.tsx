@@ -30,6 +30,21 @@ const FIRST_MONTH_COLUMN = 2;
 const LAST_MONTH_COLUMN = 13;
 const FIRST_AMOUNT_COLUMN = 1;
 const LAST_AMOUNT_COLUMN = 14;
+const DEFAULT_WORKBOOK_YEAR = 2026;
+
+interface WorkbookYearState {
+  cellValues: CellValueMap;
+  fixedExpenseRows: FixedExpenseRow[];
+  fixedExpenseSubRows: FixedExpenseSubRow[];
+  presetRows: PresetRow[];
+  selectedTabId: string;
+  stockDividends: StockDividendEntry[];
+  stockPrices: StockPriceEntry[];
+  stockRows: StockRow[];
+  stockTransactions: StockTransactionEntry[];
+  tabs: WorkbookTab[];
+  transactions: Record<string, TransactionEntry[]>;
+}
 
 export function WorkbookApp() {
   const [tabs, setTabs] = useState<WorkbookTab[]>(workbookTabs);
@@ -53,6 +68,11 @@ export function WorkbookApp() {
   >({});
   const [transactionDescription, setTransactionDescription] = useState("");
   const [transactionAmount, setTransactionAmount] = useState("");
+  const [activeYear, setActiveYear] = useState(DEFAULT_WORKBOOK_YEAR);
+  const [workbookYears, setWorkbookYears] = useState([DEFAULT_WORKBOOK_YEAR]);
+  const [yearStates, setYearStates] = useState<
+    Record<number, WorkbookYearState>
+  >({});
   const [selectedTabId, setSelectedTabId] = useState("summary");
   const [isAddingTab, setIsAddingTab] = useState(false);
   const [isRenamingTab, setIsRenamingTab] = useState(false);
@@ -86,6 +106,81 @@ export function WorkbookApp() {
       tabs
     ]
   );
+
+  function getCurrentWorkbookYearState(): WorkbookYearState {
+    return {
+      cellValues,
+      fixedExpenseRows,
+      fixedExpenseSubRows,
+      presetRows,
+      selectedTabId,
+      stockDividends,
+      stockPrices,
+      stockRows,
+      stockTransactions,
+      tabs,
+      transactions
+    };
+  }
+
+  function loadWorkbookYearState(yearState?: WorkbookYearState) {
+    const nextState = yearState ?? createEmptyWorkbookYearState();
+
+    setTabs(nextState.tabs);
+    setFixedExpenseRows(nextState.fixedExpenseRows);
+    setFixedExpenseSubRows(nextState.fixedExpenseSubRows);
+    setPresetRows(nextState.presetRows);
+    setStockRows(nextState.stockRows);
+    setStockTransactions(nextState.stockTransactions);
+    setStockPrices(nextState.stockPrices);
+    setStockDividends(nextState.stockDividends);
+    setCellValues(nextState.cellValues);
+    setTransactions(nextState.transactions);
+    setSelectedTabId(nextState.selectedTabId);
+    setTransactionCell(null);
+    setTransactionDescription("");
+    setTransactionAmount("");
+    setIsAddingTab(false);
+    setIsRenamingTab(false);
+    setTabName("");
+    setRenameTabName("");
+    setCategory("Bank");
+  }
+
+  function switchWorkbookYear(year: number) {
+    if (year === activeYear) {
+      return;
+    }
+
+    const currentState = getCurrentWorkbookYearState();
+    const nextYearState = yearStates[year];
+
+    setYearStates((currentStates) => ({
+      ...currentStates,
+      [activeYear]: currentState
+    }));
+    setActiveYear(year);
+    loadWorkbookYearState(nextYearState);
+  }
+
+  function createNextWorkbookYear() {
+    const nextYear = Math.max(...workbookYears) + 1;
+    const currentState = getCurrentWorkbookYearState();
+    const nextYearState = yearStates[nextYear] ?? createEmptyWorkbookYearState();
+
+    setYearStates((currentStates) => ({
+      ...currentStates,
+      [activeYear]: currentState,
+      [nextYear]: nextYearState
+    }));
+    setWorkbookYears((currentYears) =>
+      currentYears.includes(nextYear)
+        ? currentYears
+        : [...currentYears, nextYear].sort((first, second) => first - second)
+    );
+    setActiveYear(nextYear);
+    loadWorkbookYearState(nextYearState);
+  }
 
   function addTab() {
     const cleanName = tabName.trim();
@@ -466,10 +561,33 @@ export function WorkbookApp() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               My Finance
             </p>
-            <h1 className="mt-1 text-xl font-semibold">2026 Workbook</h1>
+            <h1 className="mt-1 text-xl font-semibold">
+              {activeYear} Workbook
+            </h1>
           </div>
 
           <nav className="p-3">
+            <div className="mb-4">
+              <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Years
+              </p>
+              <div className="grid gap-1">
+                {workbookYears.map((year) => (
+                  <button
+                    className={`w-full px-2 py-1.5 text-left text-sm ${
+                      year === activeYear
+                        ? "border border-slate-300 bg-slate-950 font-medium text-white"
+                        : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                    key={year}
+                    onClick={() => switchWorkbookYear(year)}
+                  >
+                    {year}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {tabGroups.map((group) => (
               <div key={group.title} className="mb-4">
                 <p className="mb-1 px-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -543,7 +661,10 @@ export function WorkbookApp() {
                   </button>
                 </>
               ) : null}
-              <button className="border border-slate-300 bg-white px-3 py-2 text-sm">
+              <button
+                className="border border-slate-300 bg-white px-3 py-2 text-sm"
+                onClick={createNextWorkbookYear}
+              >
                 Create Year
               </button>
               <button
@@ -745,6 +866,22 @@ export function WorkbookApp() {
 
 function createCellKey(tableId: string, rowIndex: number, columnIndex: number) {
   return `${tableId}:${rowIndex}:${columnIndex}`;
+}
+
+function createEmptyWorkbookYearState(): WorkbookYearState {
+  return {
+    cellValues: {},
+    fixedExpenseRows: [],
+    fixedExpenseSubRows: [],
+    presetRows: [],
+    selectedTabId: "summary",
+    stockDividends: [],
+    stockPrices: [],
+    stockRows: [],
+    stockTransactions: [],
+    tabs: workbookTabs,
+    transactions: {}
+  };
 }
 
 function removeRecordKeysByPrefixes<T>(record: Record<string, T>, prefixes: string[]) {
