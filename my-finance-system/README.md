@@ -87,7 +87,8 @@ To stop:
 docker compose down
 ```
 
-The compose setup creates a Docker volume named `my-finance-data` and sets:
+The compose setup bind-mounts `my-finance-system/data` to `/data` in the
+container and sets:
 
 ```text
 DATABASE_URL=file:/data/finance.db
@@ -103,9 +104,9 @@ DATABASE_URL=file:./dev.db
 ```
 
 That creates `prisma/dev.db`, which is ignored by git. In Docker, records are
-kept in the `my-finance-data` volume, so they survive container rebuilds and
-restarts. Do not run `docker compose down -v` unless you intentionally want to
-delete the saved database volume.
+kept in `my-finance-system/data/finance.db`, so they are visible in the project
+folder and survive container rebuilds and restarts. The `data` folder is kept in
+git with `.gitkeep`, but database files inside it are ignored.
 
 ## Core Product
 

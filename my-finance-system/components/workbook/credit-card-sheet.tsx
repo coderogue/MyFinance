@@ -73,6 +73,14 @@ export function CreditCardSheet({
       <WorkbookTable
         title="Credit Card Summary"
         columns={creditCardColumns}
+        getCellMode={({ columnIndex, rowIndex }) => {
+          if (columnIndex === 0) {
+            return "display";
+          }
+
+          return rowIndex === 3 || rowIndex === 5 ? "edit" : "display";
+        }}
+        onCellChange={onCellChange}
         rows={creditCardSummaryRows}
         tableId={`${tabId}:credit-card-summary`}
         values={values}

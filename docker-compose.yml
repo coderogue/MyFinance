@@ -9,8 +9,5 @@ services:
     ports:
       - "3001:3000"
     volumes:
-      - my-finance-data:/data
+      - ./my-finance-system/data:/data
     restart: unless-stopped
-
-volumes:
-  my-finance-data:

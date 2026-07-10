@@ -18,7 +18,7 @@ export function NormalTabSheet({
   name,
   onCellChange,
   onTransactionCellOpen,
-  normalTabs,
+  linkableTabs,
   onAddPreset,
   presetRows,
   tabId,
@@ -34,7 +34,7 @@ export function NormalTabSheet({
     value: string;
   }) => void;
   onTransactionCellOpen: (input: TransactionCell) => void;
-  normalTabs: WorkbookTab[];
+  linkableTabs: WorkbookTab[];
   onAddPreset: (
     tableType: NormalTableType,
     label: string,
@@ -44,15 +44,15 @@ export function NormalTabSheet({
   tabId: string;
   values: CellValueMap;
 }) {
-  const debitRows = getNormalTableRows(
-    presetRows
-      .filter((row) => row.tabId === tabId && row.tableType === "debit")
-      .map((row) => row.label)
+  const debitPresetRows = presetRows.filter(
+    (row) => row.tabId === tabId && row.tableType === "debit"
   );
+  const creditPresetRows = presetRows.filter(
+    (row) => row.tabId === tabId && row.tableType === "credit"
+  );
+  const debitRows = getNormalTableRows(debitPresetRows.map((row) => row.label));
   const creditRows = getNormalTableRows(
-    presetRows
-      .filter((row) => row.tabId === tabId && row.tableType === "credit")
-      .map((row) => row.label)
+    creditPresetRows.map((row) => row.label)
   );
 
   return (
@@ -78,14 +78,11 @@ export function NormalTabSheet({
         currentTabId={tabId}
         onCellChange={onCellChange}
         onTransactionCellOpen={onTransactionCellOpen}
-        normalTabs={normalTabs}
+        linkableTabs={linkableTabs}
         onAddPreset={onAddPreset}
+        presetRows={debitPresetRows}
         rows={debitRows}
-        presetCount={
-          presetRows.filter(
-            (row) => row.tabId === tabId && row.tableType === "debit"
-          ).length
-        }
+        presetCount={debitPresetRows.length}
         tabId={tabId}
         tableType="debit"
         title="DEBIT"
@@ -97,14 +94,11 @@ export function NormalTabSheet({
         currentTabId={tabId}
         onCellChange={onCellChange}
         onTransactionCellOpen={onTransactionCellOpen}
-        normalTabs={normalTabs}
+        linkableTabs={linkableTabs}
         onAddPreset={onAddPreset}
+        presetRows={creditPresetRows}
         rows={creditRows}
-        presetCount={
-          presetRows.filter(
-            (row) => row.tabId === tabId && row.tableType === "credit"
-          ).length
-        }
+        presetCount={creditPresetRows.length}
         tabId={tabId}
         tableType="credit"
         title="CREDIT"
@@ -119,8 +113,9 @@ function PresetTableSection({
   currentTabId,
   onCellChange,
   onTransactionCellOpen,
-  normalTabs,
+  linkableTabs,
   onAddPreset,
+  presetRows,
   rows,
   presetCount,
   tabId,
@@ -138,13 +133,14 @@ function PresetTableSection({
     value: string;
   }) => void;
   onTransactionCellOpen: (input: TransactionCell) => void;
-  normalTabs: WorkbookTab[];
+  linkableTabs: WorkbookTab[];
   onAddPreset: (
     tableType: NormalTableType,
     label: string,
     linkedTabId?: string
   ) => void;
   rows: string[][];
+  presetRows: PresetRow[];
   presetCount: number;
   tabId: string;
   tableType: NormalTableType;
@@ -155,9 +151,17 @@ function PresetTableSection({
   const [linkedTabId, setLinkedTabId] = useState("");
   const linkDescription =
     tableType === "credit"
-      ? "Optional: create matching DEBIT in another tab"
+      ? "Optional: link to another tab or Credit Card"
       : "Optional: create matching CREDIT in another tab";
-  const availableLinkedTabs = normalTabs.filter((tab) => tab.id !== currentTabId);
+  const availableLinkedTabs = linkableTabs.filter((tab) => {
+    if (tab.id === currentTabId) {
+      return false;
+    }
+
+    return tableType === "credit"
+      ? tab.kind === "normal" || tab.kind === "credit-card"
+      : tab.kind === "normal";
+  });
 
   function submitPreset() {
     const cleanLabel = label.trim();
@@ -188,7 +192,11 @@ function PresetTableSection({
           <option value="">{linkDescription}</option>
           {availableLinkedTabs.map((tab) => (
             <option key={tab.id} value={tab.id}>
-              {tableType === "credit" ? "Debit in" : "Credit in"} {tab.name}
+              {tab.kind === "credit-card"
+                ? `Statement Amount from ${tab.name}`
+                : `${tableType === "credit" ? "Debit in" : "Credit in"} ${
+                    tab.name
+                  }`}
             </option>
           ))}
         </select>
@@ -204,6 +212,15 @@ function PresetTableSection({
         columns={columns}
         getCellMode={({ columnIndex, isTotal, rowIndex }) => {
           if (columnIndex === 0 || isTotal) {
+            return "display";
+          }
+
+          const presetRow = presetRows[rowIndex];
+          const linkedTab = linkableTabs.find(
+            (tab) => tab.id === presetRow?.linkedTabId
+          );
+
+          if (linkedTab?.kind === "credit-card") {
             return "display";
           }
 

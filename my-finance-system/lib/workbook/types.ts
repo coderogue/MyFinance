@@ -106,6 +106,7 @@ export interface TransactionEntry {
   amount: string;
   description: string;
   id: string;
+  linkedTransactionId?: string;
 }
 
 export interface TransactionCell {

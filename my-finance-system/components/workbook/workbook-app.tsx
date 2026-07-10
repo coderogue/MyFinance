@@ -30,6 +30,7 @@ const FIRST_MONTH_COLUMN = 2;
 const LAST_MONTH_COLUMN = 13;
 const FIRST_AMOUNT_COLUMN = 1;
 const LAST_AMOUNT_COLUMN = 14;
+const DAY_ROW_COUNT = 31;
 const DEFAULT_WORKBOOK_YEAR = 2026;
 
 interface WorkbookYearState {
@@ -72,6 +73,7 @@ export function WorkbookApp() {
   const [transactions, setTransactions] = useState<
     Record<string, TransactionEntry[]>
   >({});
+  const [transactionLinkedTabId, setTransactionLinkedTabId] = useState("");
   const [transactionDescription, setTransactionDescription] = useState("");
   const [transactionAmount, setTransactionAmount] = useState("");
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(
@@ -95,7 +97,9 @@ export function WorkbookApp() {
   const tabGroups = useMemo(() => getWorkbookTabGroups(tabs), [tabs]);
   const selectedTab =
     tabs.find((tab) => tab.id === selectedTabId) ?? tabs[0];
-  const normalTabs = tabs.filter((tab) => tab.kind === "normal");
+  const linkableTabs = tabs.filter(
+    (tab) => tab.kind === "normal" || tab.kind === "credit-card"
+  );
   const displayCellValues = useMemo(
     () =>
       buildDisplayCellValues({
@@ -151,6 +155,7 @@ export function WorkbookApp() {
     setTransactions(nextState.transactions);
     setSelectedTabId(nextState.selectedTabId);
     setTransactionCell(null);
+    setTransactionLinkedTabId("");
     setTransactionDescription("");
     setTransactionAmount("");
     cancelTransactionEdit();
@@ -286,6 +291,59 @@ export function WorkbookApp() {
     );
     setActiveYear(nextYear);
     loadWorkbookYearState(nextYearState);
+  }
+
+  function deleteEmptyWorkbooks() {
+    const currentState = getCurrentWorkbookYearState();
+    const currentYearStates = {
+      ...yearStates,
+      [activeYear]: currentState
+    };
+    const emptyYears = workbookYears.filter((year) =>
+      isWorkbookYearStateEmpty(
+        currentYearStates[year] ?? createEmptyWorkbookYearState()
+      )
+    );
+    const nextWorkbookYears = workbookYears.filter(
+      (year) => !emptyYears.includes(year)
+    );
+
+    if (emptyYears.length === 0) {
+      window.alert("There are no empty workbooks to delete.");
+      return;
+    }
+
+    if (nextWorkbookYears.length === 0) {
+      window.alert("At least one workbook must remain.");
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete ${emptyYears.length} empty workbook${
+        emptyYears.length === 1 ? "" : "s"
+      }: ${emptyYears.join(", ")}?`
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    const nextYearStates = Object.fromEntries(
+      Object.entries(currentYearStates).filter(([year]) =>
+        nextWorkbookYears.includes(Number(year))
+      )
+    ) as Record<number, WorkbookYearState>;
+    const nextActiveYear = nextWorkbookYears.includes(activeYear)
+      ? activeYear
+      : nextWorkbookYears[0];
+
+    setWorkbookYears(nextWorkbookYears);
+    setYearStates(nextYearStates);
+
+    if (nextActiveYear !== activeYear) {
+      setActiveYear(nextActiveYear);
+      loadWorkbookYearState(nextYearStates[nextActiveYear]);
+    }
   }
 
   function addTab() {
@@ -429,6 +487,7 @@ export function WorkbookApp() {
       )
     ) {
       setTransactionCell(null);
+      setTransactionLinkedTabId("");
       setTransactionDescription("");
       setTransactionAmount("");
     }
@@ -449,7 +508,9 @@ export function WorkbookApp() {
       tableType === "credit" ? "debit" : "credit";
     const timestamp = Date.now();
     const sourcePresetId = `${selectedTab.id}-${tableType}-${timestamp}`;
-    const linkedPresetId = linkedTabId
+    const linkedTab = tabs.find((tab) => tab.id === linkedTabId);
+    const shouldCreateLinkedPreset = linkedTab?.kind === "normal";
+    const linkedPresetId = shouldCreateLinkedPreset
       ? `${linkedTabId}-${oppositeTableType}-${timestamp}`
       : undefined;
 
@@ -575,6 +636,7 @@ export function WorkbookApp() {
         ...currentValues,
         [key]: input.value
       };
+      syncLinkedPresetCellValue(nextValues, input, presetRows);
 
       if (
         !input.commit ||
@@ -601,6 +663,14 @@ export function WorkbookApp() {
         }
 
         nextValues[nextKey] = input.value;
+        syncLinkedPresetCellValue(
+          nextValues,
+          {
+            ...input,
+            columnIndex: nextColumnIndex
+          },
+          presetRows
+        );
       }
 
       return nextValues;
@@ -613,6 +683,7 @@ export function WorkbookApp() {
 
   function openTransactionCell(input: TransactionCell) {
     setTransactionCell(input);
+    setTransactionLinkedTabId("");
     setTransactionDescription("");
     setTransactionAmount("");
     cancelTransactionEdit();
@@ -620,6 +691,7 @@ export function WorkbookApp() {
 
   function closeTransactionCell() {
     setTransactionCell(null);
+    setTransactionLinkedTabId("");
     setTransactionDescription("");
     setTransactionAmount("");
     cancelTransactionEdit();
@@ -635,16 +707,23 @@ export function WorkbookApp() {
       : "";
   }
 
-  function updateTransactionCellTotal(key: string, rows: TransactionEntry[]) {
-    const total = rows.reduce(
-      (sum, row) => sum + Number(row.amount.replace(/,/g, "")),
-      0
-    );
+  function updateTransactionCellTotals(
+    cellTransactions: Record<string, TransactionEntry[]>
+  ) {
+    setCellValues((currentValues) => {
+      const nextValues = { ...currentValues };
 
-    setCellValues((currentValues) => ({
-      ...currentValues,
-      [key]: rows.length > 0 ? formatAmountTotal(total) : ""
-    }));
+      Object.entries(cellTransactions).forEach(([key, rows]) => {
+        const total = rows.reduce(
+          (sum, row) => sum + Number(row.amount.replace(/,/g, "")),
+          0
+        );
+
+        nextValues[key] = rows.length > 0 ? formatAmountTotal(total) : "";
+      });
+
+      return nextValues;
+    });
   }
 
   function addTransaction() {
@@ -660,24 +739,67 @@ export function WorkbookApp() {
     }
 
     const key = cellKey(transactionCell);
+    const linkedCell =
+      findCrossTabTransactionCell(
+        transactionCell,
+        transactionLinkedTabId,
+        presetRows
+      ) ?? findLinkedPresetCell(transactionCell, presetRows);
+    const linkedKey = linkedCell
+      ? createCellKey(
+          linkedCell.tableId,
+          linkedCell.rowIndex,
+          transactionCell.columnIndex
+        )
+      : null;
+    const transactionId = `${key}:${Date.now()}`;
+    const linkedTransactionId = linkedKey
+      ? `${linkedKey}:${Date.now()}`
+      : undefined;
     const nextTransaction: TransactionEntry = {
       amount: cleanAmount,
       description: cleanDescription,
-      id: `${key}:${Date.now()}`
+      id: transactionId,
+      linkedTransactionId
     };
+    const nextLinkedTransaction: TransactionEntry | null =
+      linkedKey && linkedTransactionId
+        ? {
+            amount: cleanAmount,
+            description: cleanDescription,
+            id: linkedTransactionId,
+            linkedTransactionId: transactionId
+          }
+        : null;
 
     setTransactions((currentTransactions) => {
       const nextRows = [...(currentTransactions[key] ?? []), nextTransaction];
-      updateTransactionCellTotal(key, nextRows);
-
-      return {
+      const nextTransactions = {
         ...currentTransactions,
         [key]: nextRows
       };
+      const nextCellTransactions: Record<string, TransactionEntry[]> = {
+        [key]: nextRows
+      };
+
+      if (linkedKey && nextLinkedTransaction) {
+        const nextLinkedRows = [
+          ...(currentTransactions[linkedKey] ?? []),
+          nextLinkedTransaction
+        ];
+
+        nextTransactions[linkedKey] = nextLinkedRows;
+        nextCellTransactions[linkedKey] = nextLinkedRows;
+      }
+
+      updateTransactionCellTotals(nextCellTransactions);
+
+      return nextTransactions;
     });
 
     setTransactionDescription("");
     setTransactionAmount("");
+    setTransactionLinkedTabId("");
   }
 
   function startTransactionEdit(row: TransactionEntry) {
@@ -707,7 +829,9 @@ export function WorkbookApp() {
     const key = cellKey(transactionCell);
 
     setTransactions((currentTransactions) => {
-      const nextRows = (currentTransactions[key] ?? []).map((row) =>
+      const currentRows = currentTransactions[key] ?? [];
+      const editedRow = currentRows.find((row) => row.id === editingTransactionId);
+      const nextRows = currentRows.map((row) =>
         row.id === editingTransactionId
           ? {
               ...row,
@@ -716,15 +840,52 @@ export function WorkbookApp() {
             }
           : row
       );
-      updateTransactionCellTotal(key, nextRows);
-
-      return {
+      const nextTransactions = {
         ...currentTransactions,
         [key]: nextRows
       };
+      const nextCellTransactions: Record<string, TransactionEntry[]> = {
+        [key]: nextRows
+      };
+      const linkedKey = editedRow?.linkedTransactionId
+        ? findTransactionKeyById(
+            currentTransactions,
+            editedRow.linkedTransactionId
+          )
+        : null;
+
+      if (linkedKey && editedRow?.linkedTransactionId) {
+        const nextLinkedRows = (currentTransactions[linkedKey] ?? []).map(
+          (row) =>
+            row.id === editedRow.linkedTransactionId
+              ? {
+                  ...row,
+                  amount: cleanAmount,
+                  description: cleanDescription
+                }
+              : row
+        );
+
+        nextTransactions[linkedKey] = nextLinkedRows;
+        nextCellTransactions[linkedKey] = nextLinkedRows;
+      }
+
+      updateTransactionCellTotals(nextCellTransactions);
+
+      return nextTransactions;
     });
     cancelTransactionEdit();
   }
+
+  const linkedTransactionCell = transactionCell
+    ? findLinkedPresetCell(transactionCell, presetRows)
+    : null;
+  const linkedTransactionTabName = linkedTransactionCell
+    ? getTabNameFromTableId(linkedTransactionCell.tableId, tabs)
+    : null;
+  const transactionTargetTabs = transactionCell
+    ? getAvailableTransactionTargetTabs(transactionCell, tabs, presetRows)
+    : [];
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
@@ -841,6 +1002,12 @@ export function WorkbookApp() {
                 Create Year
               </button>
               <button
+                className="border border-slate-300 bg-white px-3 py-2 text-sm"
+                onClick={deleteEmptyWorkbooks}
+              >
+                Delete Empty Years
+              </button>
+              <button
                 className="border border-slate-950 bg-slate-950 px-3 py-2 text-sm text-white"
                 onClick={() => setIsAddingTab(true)}
               >
@@ -954,7 +1121,7 @@ export function WorkbookApp() {
                 name={selectedTab.name}
                 onCellChange={updateCell}
                 onTransactionCellOpen={openTransactionCell}
-                normalTabs={normalTabs}
+                linkableTabs={linkableTabs}
                 onAddPreset={addPreset}
                 presetRows={presetRows}
                 tabId={selectedTab.id}
@@ -971,6 +1138,11 @@ export function WorkbookApp() {
                   <p className="mt-1 text-sm text-slate-600">
                     {transactionCell.title}
                   </p>
+                  {linkedTransactionTabName ? (
+                    <p className="mt-1 text-xs font-medium text-teal-700">
+                      Also records in {linkedTransactionTabName}
+                    </p>
+                  ) : null}
                 </div>
                 <button
                   className="border border-slate-300 px-2 py-1 text-sm"
@@ -996,6 +1168,22 @@ export function WorkbookApp() {
                   placeholder="Amount"
                   value={transactionAmount}
                 />
+                {transactionTargetTabs.length > 0 ? (
+                  <select
+                    className="border border-slate-300 px-3 py-2 text-sm"
+                    onChange={(event) =>
+                      setTransactionLinkedTabId(event.target.value)
+                    }
+                    value={transactionLinkedTabId}
+                  >
+                    <option value="">Record only here</option>
+                    {transactionTargetTabs.map((tab) => (
+                      <option key={tab.id} value={tab.id}>
+                        Also record in {tab.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 <button
                   className="border border-slate-950 bg-slate-950 px-3 py-2 text-sm text-white"
                   onClick={addTransaction}
@@ -1093,6 +1281,205 @@ function createCellKey(tableId: string, rowIndex: number, columnIndex: number) {
   return `${tableId}:${rowIndex}:${columnIndex}`;
 }
 
+function syncLinkedPresetCellValue(
+  values: CellValueMap,
+  input: {
+    columnIndex: number;
+    rowIndex: number;
+    tableId: string;
+    value: string;
+  },
+  presetRows: PresetRow[]
+) {
+  const linkedCell = findLinkedPresetCell(input, presetRows);
+
+  if (!linkedCell) {
+    return;
+  }
+
+  values[
+    createCellKey(
+      linkedCell.tableId,
+      linkedCell.rowIndex,
+      input.columnIndex
+    )
+  ] = input.value;
+}
+
+function findLinkedPresetCell(
+  input: {
+    rowIndex: number;
+    tableId: string;
+  },
+  presetRows: PresetRow[]
+) {
+  const tableType = getNormalTableType(input.tableId);
+
+  if (!tableType) {
+    return null;
+  }
+
+  const tabId = input.tableId.slice(0, -`:${tableType}`.length);
+  const tableRows = presetRows.filter(
+    (row) => row.tabId === tabId && row.tableType === tableType
+  );
+  const presetRow = tableRows[input.rowIndex];
+
+  if (!presetRow?.linkedPresetRowId) {
+    return null;
+  }
+
+  const linkedPresetRow = presetRows.find(
+    (row) => row.id === presetRow.linkedPresetRowId
+  );
+
+  if (!linkedPresetRow || linkedPresetRow.tabId === tabId) {
+    return null;
+  }
+
+  const linkedTableRows = presetRows.filter(
+    (row) =>
+      row.tabId === linkedPresetRow.tabId &&
+      row.tableType === linkedPresetRow.tableType
+  );
+  const linkedRowIndex = linkedTableRows.findIndex(
+    (row) => row.id === linkedPresetRow.id
+  );
+
+  if (linkedRowIndex < 0) {
+    return null;
+  }
+
+  return {
+    rowIndex: linkedRowIndex,
+    tableId: `${linkedPresetRow.tabId}:${linkedPresetRow.tableType}`
+  };
+}
+
+function getNormalTableType(tableId: string): NormalTableType | null {
+  if (tableId.endsWith(":debit")) {
+    return "debit";
+  }
+
+  if (tableId.endsWith(":credit")) {
+    return "credit";
+  }
+
+  return null;
+}
+
+function getTabNameFromTableId(tableId: string, tabs: WorkbookTab[]) {
+  const tableType = getNormalTableType(tableId);
+
+  if (!tableType) {
+    return null;
+  }
+
+  const tabId = tableId.slice(0, -`:${tableType}`.length);
+
+  return tabs.find((tab) => tab.id === tabId)?.name ?? null;
+}
+
+function findCrossTabTransactionCell(
+  input: TransactionCell,
+  linkedTabId: string,
+  presetRows: PresetRow[]
+) {
+  if (!linkedTabId) {
+    return null;
+  }
+
+  const sourceTableType = getNormalTableType(input.tableId);
+  const sourceTabId = getNormalTableTabId(input.tableId);
+
+  if (!sourceTableType || !sourceTabId || sourceTabId === linkedTabId) {
+    return null;
+  }
+
+  const sourcePresetCount = getPresetRowsForTable(
+    presetRows,
+    sourceTabId,
+    sourceTableType
+  ).length;
+  const dayRowOffset = input.rowIndex - sourcePresetCount;
+
+  if (dayRowOffset < 0 || dayRowOffset >= DAY_ROW_COUNT) {
+    return null;
+  }
+
+  const targetTableType =
+    sourceTableType === "debit" ? "credit" : "debit";
+  const targetPresetCount = getPresetRowsForTable(
+    presetRows,
+    linkedTabId,
+    targetTableType
+  ).length;
+
+  return {
+    rowIndex: targetPresetCount + dayRowOffset,
+    tableId: `${linkedTabId}:${targetTableType}`
+  };
+}
+
+function getAvailableTransactionTargetTabs(
+  input: TransactionCell,
+  tabs: WorkbookTab[],
+  presetRows: PresetRow[]
+) {
+  const sourceTableType = getNormalTableType(input.tableId);
+  const sourceTabId = getNormalTableTabId(input.tableId);
+
+  if (!sourceTableType || !sourceTabId) {
+    return [];
+  }
+
+  const sourcePresetCount = getPresetRowsForTable(
+    presetRows,
+    sourceTabId,
+    sourceTableType
+  ).length;
+  const dayRowOffset = input.rowIndex - sourcePresetCount;
+
+  if (dayRowOffset < 0 || dayRowOffset >= DAY_ROW_COUNT) {
+    return [];
+  }
+
+  return tabs.filter(
+    (tab) => tab.kind === "normal" && tab.id !== sourceTabId
+  );
+}
+
+function getNormalTableTabId(tableId: string) {
+  const tableType = getNormalTableType(tableId);
+
+  if (!tableType) {
+    return null;
+  }
+
+  return tableId.slice(0, -`:${tableType}`.length);
+}
+
+function getPresetRowsForTable(
+  presetRows: PresetRow[],
+  tabId: string,
+  tableType: NormalTableType
+) {
+  return presetRows.filter(
+    (row) => row.tabId === tabId && row.tableType === tableType
+  );
+}
+
+function findTransactionKeyById(
+  transactions: Record<string, TransactionEntry[]>,
+  transactionId: string
+) {
+  return (
+    Object.entries(transactions).find(([, rows]) =>
+      rows.some((row) => row.id === transactionId)
+    )?.[0] ?? null
+  );
+}
+
 function createEmptyWorkbookYearState(): WorkbookYearState {
   return {
     cellValues: {},
@@ -1107,6 +1494,39 @@ function createEmptyWorkbookYearState(): WorkbookYearState {
     tabs: workbookTabs,
     transactions: {}
   };
+}
+
+function isWorkbookYearStateEmpty(yearState: WorkbookYearState) {
+  return (
+    hasOnlySummaryTab(yearState.tabs) &&
+    hasNoMeaningfulRecordValues(yearState.cellValues) &&
+    yearState.fixedExpenseRows.length === 0 &&
+    yearState.fixedExpenseSubRows.length === 0 &&
+    yearState.presetRows.length === 0 &&
+    yearState.stockDividends.length === 0 &&
+    yearState.stockPrices.length === 0 &&
+    yearState.stockRows.length === 0 &&
+    yearState.stockTransactions.length === 0 &&
+    hasNoTransactionRows(yearState.transactions)
+  );
+}
+
+function hasOnlySummaryTab(tabs: WorkbookTab[]) {
+  return (
+    tabs.length === 1 &&
+    tabs[0]?.id === "summary" &&
+    tabs[0]?.kind === "summary"
+  );
+}
+
+function hasNoMeaningfulRecordValues(record: Record<string, string>) {
+  return Object.values(record).every((value) => value.trim() === "");
+}
+
+function hasNoTransactionRows(
+  transactions: Record<string, TransactionEntry[]>
+) {
+  return Object.values(transactions).every((rows) => rows.length === 0);
 }
 
 function removeRecordKeysByPrefixes<T>(record: Record<string, T>, prefixes: string[]) {
@@ -1150,10 +1570,12 @@ function buildDisplayCellValues({
 }) {
   const displayValues: CellValueMap = { ...cellValues };
 
+  syncLinkedNormalPresetValues(displayValues, presetRows);
+
   tabs
     .filter((tab) => tab.kind === "normal")
     .forEach((tab) => {
-      calculateNormalTabValues(tab, presetRows, displayValues);
+      calculateNormalTabValues(tab, presetRows, displayValues, tabs);
     });
 
   for (const fixedExpenseRow of fixedExpenseRows) {
@@ -1257,17 +1679,80 @@ function buildDisplayCellValues({
   return displayValues;
 }
 
+function syncLinkedNormalPresetValues(
+  displayValues: CellValueMap,
+  presetRows: PresetRow[]
+) {
+  const syncedPresetIds = new Set<string>();
+
+  presetRows.forEach((presetRow) => {
+    if (!presetRow.linkedPresetRowId || syncedPresetIds.has(presetRow.id)) {
+      return;
+    }
+
+    const linkedPresetRow = presetRows.find(
+      (row) => row.id === presetRow.linkedPresetRowId
+    );
+
+    if (!linkedPresetRow || linkedPresetRow.tabId === presetRow.tabId) {
+      return;
+    }
+
+    const rowIndex = getPresetRowIndex(presetRows, presetRow);
+    const linkedRowIndex = getPresetRowIndex(presetRows, linkedPresetRow);
+
+    if (rowIndex < 0 || linkedRowIndex < 0) {
+      return;
+    }
+
+    const tableId = `${presetRow.tabId}:${presetRow.tableType}`;
+    const linkedTableId = `${linkedPresetRow.tabId}:${linkedPresetRow.tableType}`;
+
+    for (
+      let columnIndex = FIRST_AMOUNT_COLUMN;
+      columnIndex <= LAST_AMOUNT_COLUMN;
+      columnIndex += 1
+    ) {
+      const key = createCellKey(tableId, rowIndex, columnIndex);
+      const linkedKey = createCellKey(
+        linkedTableId,
+        linkedRowIndex,
+        columnIndex
+      );
+      const value = displayValues[key] || displayValues[linkedKey] || "";
+
+      displayValues[key] = value;
+      displayValues[linkedKey] = value;
+    }
+
+    syncedPresetIds.add(presetRow.id);
+    syncedPresetIds.add(linkedPresetRow.id);
+  });
+}
+
+function getPresetRowIndex(presetRows: PresetRow[], targetRow: PresetRow) {
+  return presetRows
+    .filter(
+      (row) =>
+        row.tabId === targetRow.tabId && row.tableType === targetRow.tableType
+    )
+    .findIndex((row) => row.id === targetRow.id);
+}
+
 function calculateNormalTabValues(
   tab: WorkbookTab,
   presetRows: PresetRow[],
-  displayValues: CellValueMap
+  displayValues: CellValueMap,
+  tabs: WorkbookTab[]
 ) {
-  const debitPresetCount = presetRows.filter(
+  const debitPresetRows = presetRows.filter(
     (row) => row.tabId === tab.id && row.tableType === "debit"
-  ).length;
-  const creditPresetCount = presetRows.filter(
+  );
+  const creditPresetRows = presetRows.filter(
     (row) => row.tabId === tab.id && row.tableType === "credit"
-  ).length;
+  );
+  const debitPresetCount = debitPresetRows.length;
+  const creditPresetCount = creditPresetRows.length;
   const debitTotalRowIndex = debitPresetCount + 31;
   const creditTotalRowIndex = creditPresetCount + 31;
 
@@ -1276,6 +1761,14 @@ function calculateNormalTabValues(
     columnIndex <= LAST_AMOUNT_COLUMN;
     columnIndex += 1
   ) {
+    syncLinkedCreditCardStatementAmounts({
+      columnIndex,
+      displayValues,
+      presetRows: creditPresetRows,
+      tabs,
+      tabId: tab.id
+    });
+
     const debitTotal = sumTableColumn(
       `${tab.id}:debit`,
       debitTotalRowIndex,
@@ -1329,6 +1822,33 @@ function calculateNormalTabValues(
 
     previousBalance = balance;
   }
+}
+
+function syncLinkedCreditCardStatementAmounts({
+  columnIndex,
+  displayValues,
+  presetRows,
+  tabs,
+  tabId
+}: {
+  columnIndex: number;
+  displayValues: CellValueMap;
+  presetRows: PresetRow[];
+  tabs: WorkbookTab[];
+  tabId: string;
+}) {
+  presetRows.forEach((presetRow, rowIndex) => {
+    const linkedTab = tabs.find((tab) => tab.id === presetRow.linkedTabId);
+
+    if (linkedTab?.kind !== "credit-card") {
+      return;
+    }
+
+    displayValues[createCellKey(`${tabId}:credit`, rowIndex, columnIndex)] =
+      displayValues[
+        createCellKey(`${linkedTab.id}:credit-card-summary`, 5, columnIndex)
+      ] ?? "";
+  });
 }
 
 function calculateCreditCardTabValues(
