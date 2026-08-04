@@ -96,6 +96,15 @@ DATABASE_URL=file:/data/finance.db
 
 Workbook data is persisted to SQLite through `app/api/workbook-state`.
 The app saves a workbook snapshot after edits and reloads it on startup.
+Autosave is enabled only after a successful, validated load. Saves use revision
+checks so a stale browser session cannot overwrite newer data, and the API
+rejects attempts to replace a populated workbook with an empty state. Before
+each accepted update, the previous snapshot is retained in the
+`WorkbookStateRevision` table (latest 50 revisions).
+
+The application requires registration and login. Passwords are hashed with
+scrypt, sessions use secure HTTP-only cookies, and workbook records and their
+revision history are isolated by user account.
 
 For local development, `.env` and `.env.local` point Prisma to:
 
@@ -111,3 +120,29 @@ git with `.gitkeep`, but database files inside it are ignored.
 ## Core Product
 
 This is not a normal ledger-first app. It is an Excel-style annual workbook with better interactions.
+
+## Telegram Notifications
+
+1. In Telegram, open `@BotFather`, run `/newbot`, and copy the bot token.
+2. Add the token to the ignored `.env.local` file:
+
+   ```text
+   TELEGRAM_BOT_TOKEN="your-token"
+   TELEGRAM_CHAT_ID=""
+   ```
+
+3. Open the new bot, press **Start**, and send it any message.
+4. Discover your chat ID:
+
+   ```bash
+   npm run telegram:chat-id
+   ```
+
+5. Put the returned ID in `TELEGRAM_CHAT_ID` and test:
+
+   ```bash
+   npm run telegram:send -- "My Finance notification test"
+   ```
+
+Never commit the bot token. Telegram bots cannot initiate a conversation until
+you have opened the bot and pressed **Start**.

@@ -15,6 +15,14 @@ const LAST_MONTH_COLUMN = 13;
 const CLOSING_COLUMN = 14;
 const DIVIDEND_TOTAL_COLUMN = 13;
 
+type StockSortMode = "summary" | "transactions" | "dividend";
+
+interface StockSortState {
+  columnIndex: number;
+  direction: "asc" | "desc";
+  mode: StockSortMode;
+}
+
 type StockCell =
   | {
       columnIndex: number;
@@ -45,6 +53,7 @@ export function StockSheet({
   onAddStockPrice,
   onAddStock,
   onAddStockTransaction,
+  onUpdateStockPrice,
   onUpdateStockTransaction,
   stocks,
   stockDividends,
@@ -58,6 +67,7 @@ export function StockSheet({
   onAddStockPrice: (input: Omit<StockPriceEntry, "id">) => void;
   onAddStock: (label: string) => void;
   onAddStockTransaction: (input: Omit<StockTransactionEntry, "id">) => void;
+  onUpdateStockPrice: (input: StockPriceEntry) => void;
   onUpdateStockTransaction: (input: StockTransactionEntry) => void;
   stocks: StockRow[];
   stockDividends: StockDividendEntry[];
@@ -78,6 +88,15 @@ export function StockSheet({
   const [editingTransactionDate, setEditingTransactionDate] = useState("");
   const [editingQuantity, setEditingQuantity] = useState("");
   const [editingPrice, setEditingPrice] = useState("");
+  const [editingPriceEntryId, setEditingPriceEntryId] = useState<string | null>(
+    null
+  );
+  const [editingPriceValue, setEditingPriceValue] = useState("");
+  const [sortState, setSortState] = useState<StockSortState>({
+    columnIndex: 0,
+    direction: "asc",
+    mode: "summary"
+  });
   const instrumentLabel = category === "Managed Funds" ? "Managed Fund" : "Stock";
   const dividendLabel = category === "Managed Funds" ? "Distribution" : "Dividend";
   const tabStocks = stocks.filter((stock) => stock.tabId === tabId);
@@ -113,6 +132,17 @@ export function StockSheet({
           entry.columnIndex === activeCell.columnIndex
       )
     : [];
+  const sortedStocks = useMemo(
+    () =>
+      sortStocks({
+        dividends: tabDividends,
+        prices: tabPrices,
+        sortState,
+        stocks: tabStocks,
+        transactions: tabTransactions
+      }),
+    [sortState, tabDividends, tabPrices, tabStocks, tabTransactions]
+  );
 
   function addStock() {
     const cleanName = stockName.trim();
@@ -196,7 +226,47 @@ export function StockSheet({
     setPrice("");
     setDividendDate("");
     setDividendAmount("");
+    cancelPriceEdit();
     cancelTransactionEdit();
+  }
+
+  function handleSort(mode: StockSortMode, columnIndex: number) {
+    setSortState((currentSortState) => {
+      const isSameSort =
+        currentSortState.mode === mode &&
+        currentSortState.columnIndex === columnIndex;
+
+      return {
+        columnIndex,
+        direction:
+          isSameSort && currentSortState.direction === "asc" ? "desc" : "asc",
+        mode
+      };
+    });
+  }
+
+  function startPriceEdit(entry: StockPriceEntry) {
+    setEditingPriceEntryId(entry.id);
+    setEditingPriceValue(entry.price);
+  }
+
+  function cancelPriceEdit() {
+    setEditingPriceEntryId(null);
+    setEditingPriceValue("");
+  }
+
+  function savePriceEdit(entry: StockPriceEntry) {
+    const cleanPrice = formatNumber(editingPriceValue);
+
+    if (!cleanPrice) {
+      return;
+    }
+
+    onUpdateStockPrice({
+      ...entry,
+      price: cleanPrice
+    });
+    cancelPriceEdit();
   }
 
   function startTransactionEdit(entry: StockTransactionEntry) {
@@ -262,6 +332,7 @@ export function StockSheet({
           getStockValuation(stock.id, columnIndex, tabTransactions, tabPrices)
         }
         lockedColumnIndex={CLOSING_COLUMN}
+        onSort={(columnIndex) => handleSort("summary", columnIndex)}
         onCellClick={(stock, columnIndex) => {
           if (columnIndex === CLOSING_COLUMN) {
             return;
@@ -275,7 +346,8 @@ export function StockSheet({
             title: `${stock.label} / ${stockColumns[columnIndex]} Current Price`
           });
         }}
-        stocks={tabStocks}
+        sortState={sortState.mode === "summary" ? sortState : undefined}
+        stocks={sortedStocks}
         title={`${instrumentLabel} Summary`}
         tone="slate"
       />
@@ -286,6 +358,7 @@ export function StockSheet({
           getStockTransactionValue(stock.id, columnIndex, tabTransactions)
         }
         lockedColumnIndex={CLOSING_COLUMN}
+        onSort={(columnIndex) => handleSort("transactions", columnIndex)}
         onCellClick={(stock, columnIndex) => {
           if (columnIndex === CLOSING_COLUMN) {
             return;
@@ -299,7 +372,8 @@ export function StockSheet({
             title: `${stock.label} / ${stockColumns[columnIndex]}`
           });
         }}
-        stocks={tabStocks}
+        sortState={sortState.mode === "transactions" ? sortState : undefined}
+        stocks={sortedStocks}
         title={`${instrumentLabel} Transactions`}
         tone="blue"
       />
@@ -310,6 +384,7 @@ export function StockSheet({
           getDividendValue(stock.id, columnIndex, tabDividends)
         }
         lockedColumnIndex={DIVIDEND_TOTAL_COLUMN}
+        onSort={(columnIndex) => handleSort("dividend", columnIndex)}
         onCellClick={(stock, columnIndex) => {
           if (columnIndex === DIVIDEND_TOTAL_COLUMN) {
             return;
@@ -323,7 +398,8 @@ export function StockSheet({
             title: `${stock.label} / ${dividendColumns[columnIndex]} ${dividendLabel}`
           });
         }}
-        stocks={tabStocks}
+        sortState={sortState.mode === "dividend" ? sortState : undefined}
+        stocks={sortedStocks}
         title={dividendLabel}
         tone="yellow"
       />
@@ -364,7 +440,17 @@ export function StockSheet({
               >
                 Update Current Price
               </button>
-              <PreviousPriceEntries entries={previousPrices} />
+              <PreviousPriceEntries
+                editingEntry={{
+                  id: editingPriceEntryId,
+                  price: editingPriceValue
+                }}
+                entries={previousPrices}
+                onCancelEdit={cancelPriceEdit}
+                onChangePrice={setEditingPriceValue}
+                onSaveEdit={savePriceEdit}
+                onStartEdit={startPriceEdit}
+              />
             </div>
           ) : activeCell.mode === "stock" ? (
             <div className="mt-4 grid gap-3">
@@ -442,19 +528,74 @@ export function StockSheet({
   );
 }
 
-function PreviousPriceEntries({ entries }: { entries: StockPriceEntry[] }) {
+function PreviousPriceEntries({
+  editingEntry,
+  entries,
+  onCancelEdit,
+  onChangePrice,
+  onSaveEdit,
+  onStartEdit
+}: {
+  editingEntry: {
+    id: string | null;
+    price: string;
+  };
+  entries: StockPriceEntry[];
+  onCancelEdit: () => void;
+  onChangePrice: (value: string) => void;
+  onSaveEdit: (entry: StockPriceEntry) => void;
+  onStartEdit: (entry: StockPriceEntry) => void;
+}) {
   return (
     <PreviousEntries title="Previous Price Updates">
       {entries.length > 0 ? (
-        entries.map((entry) => (
-          <tr key={entry.id}>
-            <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-              {entry.price}
-            </td>
-          </tr>
-        ))
+        entries.map((entry) => {
+          const isEditing = editingEntry.id === entry.id;
+
+          return (
+            <tr key={entry.id}>
+              <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
+                {isEditing ? (
+                  <input
+                    className="w-full border border-slate-300 px-2 py-1 text-right"
+                    inputMode="decimal"
+                    onChange={(event) => onChangePrice(event.target.value)}
+                    value={editingEntry.price}
+                  />
+                ) : (
+                  entry.price
+                )}
+              </td>
+              <td className="border border-slate-200 px-2 py-2">
+                {isEditing ? (
+                  <div className="flex gap-2">
+                    <button
+                      className="border border-slate-950 bg-slate-950 px-2 py-1 text-xs text-white"
+                      onClick={() => onSaveEdit(entry)}
+                    >
+                      Save
+                    </button>
+                    <button
+                      className="border border-slate-300 px-2 py-1 text-xs"
+                      onClick={onCancelEdit}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="border border-slate-300 px-2 py-1 text-xs"
+                    onClick={() => onStartEdit(entry)}
+                  >
+                    Edit
+                  </button>
+                )}
+              </td>
+            </tr>
+          );
+        })
       ) : (
-        <EmptyPreviousEntries colSpan={1} />
+        <EmptyPreviousEntries colSpan={2} />
       )}
     </PreviousEntries>
   );
@@ -629,12 +770,85 @@ function EmptyPreviousEntries({ colSpan }: { colSpan: number }) {
   );
 }
 
+function sortStocks({
+  dividends,
+  prices,
+  sortState,
+  stocks,
+  transactions
+}: {
+  dividends: StockDividendEntry[];
+  prices: StockPriceEntry[];
+  sortState: StockSortState;
+  stocks: StockRow[];
+  transactions: StockTransactionEntry[];
+}) {
+  return [...stocks].sort((firstStock, secondStock) => {
+    const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
+
+    if (sortState.columnIndex === 0) {
+      return (
+        firstStock.label.localeCompare(secondStock.label) * directionMultiplier
+      );
+    }
+
+    const firstValue = getSortableStockValue({
+      dividends,
+      prices,
+      sortState,
+      stock: firstStock,
+      transactions
+    });
+    const secondValue = getSortableStockValue({
+      dividends,
+      prices,
+      sortState,
+      stock: secondStock,
+      transactions
+    });
+
+    return (firstValue - secondValue) * directionMultiplier;
+  });
+}
+
+function getSortableStockValue({
+  dividends,
+  prices,
+  sortState,
+  stock,
+  transactions
+}: {
+  dividends: StockDividendEntry[];
+  prices: StockPriceEntry[];
+  sortState: StockSortState;
+  stock: StockRow;
+  transactions: StockTransactionEntry[];
+}) {
+  if (sortState.mode === "summary") {
+    return parseNumber(
+      getStockValuation(stock.id, sortState.columnIndex, transactions, prices)
+    );
+  }
+
+  if (sortState.mode === "transactions") {
+    return parseNumber(
+      getStockTransactionValue(stock.id, sortState.columnIndex, transactions)
+    );
+  }
+
+  return parseNumber(
+    getDividendValue(stock.id, sortState.columnIndex, dividends)
+  );
+}
+
 function StockGrid({
   columns,
   getValue,
   isDisplayOnly = false,
   lockedColumnIndex,
   onCellClick,
+  onSort,
+  sortState,
   stocks,
   title,
   tone
@@ -644,6 +858,8 @@ function StockGrid({
   isDisplayOnly?: boolean;
   lockedColumnIndex: number;
   onCellClick?: (stock: StockRow, columnIndex: number) => void;
+  onSort?: (columnIndex: number) => void;
+  sortState?: Pick<StockSortState, "columnIndex" | "direction">;
   stocks: StockRow[];
   title: string;
   tone: "slate" | "blue" | "yellow";
@@ -677,7 +893,19 @@ function StockGrid({
                   }`}
                   key={column}
                 >
-                  {column}
+                  <button
+                    className={`w-full uppercase ${
+                      index > 0 ? "text-right" : "text-center"
+                    }`}
+                    onClick={() => onSort?.(index)}
+                  >
+                    {column}
+                    {sortState?.columnIndex === index
+                      ? sortState.direction === "asc"
+                        ? " ▲"
+                        : " ▼"
+                      : ""}
+                  </button>
                 </th>
               ))}
             </tr>

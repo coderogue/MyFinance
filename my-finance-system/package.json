@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "telegram:chat-id": "node scripts/telegram-notify.mjs --discover-chat-id",
+    "telegram:send": "node scripts/telegram-notify.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
@@ -32,4 +34,3 @@
     "typescript": "^5.7.0"
   }
 }
-

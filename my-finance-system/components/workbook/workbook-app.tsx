@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   getWorkbookTabGroups,
   userTabCategories,
@@ -53,7 +54,7 @@ interface PersistedWorkbookState {
   yearStates: Record<number, WorkbookYearState>;
 }
 
-export function WorkbookApp() {
+export function WorkbookApp({ accountControls }: { accountControls?: ReactNode }) {
   const [tabs, setTabs] = useState<WorkbookTab[]>(workbookTabs);
   const [fixedExpenseRows, setFixedExpenseRows] = useState<FixedExpenseRow[]>([]);
   const [fixedExpenseSubRows, setFixedExpenseSubRows] = useState<
@@ -87,7 +88,12 @@ export function WorkbookApp() {
   const [yearStates, setYearStates] = useState<
     Record<number, WorkbookYearState>
   >({});
-  const [hasLoadedWorkbookState, setHasLoadedWorkbookState] = useState(false);
+  const [loadStatus, setLoadStatus] = useState<"loading" | "loaded" | "failed">(
+    "loading"
+  );
+  const [persistenceError, setPersistenceError] = useState("");
+  const revisionRef = useRef(0);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [selectedTabId, setSelectedTabId] = useState("summary");
   const [isAddingTab, setIsAddingTab] = useState(false);
   const [isRenamingTab, setIsRenamingTab] = useState(false);
@@ -181,28 +187,42 @@ export function WorkbookApp() {
 
         const result = (await response.json()) as {
           data: PersistedWorkbookState | null;
+          revision: number;
         };
 
-        if (didCancel || !result.data) {
+        if (didCancel) {
           return;
         }
 
-        const nextActiveYear = result.data.activeYear;
-        const nextYearStates = result.data.yearStates ?? {};
-        const nextWorkbookYears =
-          result.data.workbookYears?.length > 0
-            ? result.data.workbookYears
-            : [nextActiveYear];
+        revisionRef.current = result.revision;
 
-        setActiveYear(nextActiveYear);
-        setWorkbookYears(nextWorkbookYears);
-        setYearStates(nextYearStates);
-        loadWorkbookYearState(nextYearStates[nextActiveYear]);
+        if (result.data) {
+          const nextActiveYear = result.data.activeYear;
+          const nextYearStates = result.data.yearStates ?? {};
+          const nextWorkbookYears =
+            result.data.workbookYears?.length > 0
+              ? result.data.workbookYears
+              : [nextActiveYear];
+
+          if (!nextYearStates[nextActiveYear]) {
+            throw new Error("The saved workbook does not contain its active year.");
+          }
+
+          setActiveYear(nextActiveYear);
+          setWorkbookYears(nextWorkbookYears);
+          setYearStates(nextYearStates);
+          loadWorkbookYearState(nextYearStates[nextActiveYear]);
+        }
+
+        setPersistenceError("");
+        setLoadStatus("loaded");
       } catch (error) {
         console.error(error);
-      } finally {
         if (!didCancel) {
-          setHasLoadedWorkbookState(true);
+          setPersistenceError(
+            "Saved data could not be loaded. Autosave is disabled to protect the database."
+          );
+          setLoadStatus("failed");
         }
       }
     }
@@ -215,28 +235,49 @@ export function WorkbookApp() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoadedWorkbookState) {
+    if (loadStatus !== "loaded") {
       return;
     }
 
     const saveTimeout = window.setTimeout(() => {
-      const nextYearStates = {
+      const nextYearStates = syncCarryForwardAcrossYears({
         ...yearStates,
         [activeYear]: getCurrentWorkbookYearState()
-      };
+      }, workbookYears);
       const payload: PersistedWorkbookState = {
         activeYear,
         workbookYears,
         yearStates: nextYearStates
       };
 
-      void fetch("/api/workbook-state", {
-        body: JSON.stringify(payload),
-        headers: {
-          "Content-Type": "application/json"
-        },
-        method: "PUT"
-      }).catch((error) => console.error(error));
+      saveQueueRef.current = saveQueueRef.current.then(async () => {
+        const response = await fetch("/api/workbook-state", {
+          body: JSON.stringify({
+            data: payload,
+            expectedRevision: revisionRef.current
+          }),
+          headers: {
+            "Content-Type": "application/json"
+          },
+          method: "PUT"
+        });
+        const result = (await response.json()) as {
+          error?: string;
+          revision?: number;
+        };
+
+        if (!response.ok || typeof result.revision !== "number") {
+          throw new Error(result.error ?? "Unable to save workbook state.");
+        }
+
+        revisionRef.current = result.revision;
+        setPersistenceError("");
+      }).catch((error) => {
+        console.error(error);
+        setPersistenceError(
+          error instanceof Error ? error.message : "Unable to save workbook state."
+        );
+      });
     }, 600);
 
     return () => window.clearTimeout(saveTimeout);
@@ -245,7 +286,7 @@ export function WorkbookApp() {
     cellValues,
     fixedExpenseRows,
     fixedExpenseSubRows,
-    hasLoadedWorkbookState,
+    loadStatus,
     presetRows,
     selectedTabId,
     stockDividends,
@@ -264,12 +305,13 @@ export function WorkbookApp() {
     }
 
     const currentState = getCurrentWorkbookYearState();
-    const nextYearState = yearStates[year];
-
-    setYearStates((currentStates) => ({
-      ...currentStates,
+    const nextYearStates = syncCarryForwardAcrossYears({
+      ...yearStates,
       [activeYear]: currentState
-    }));
+    }, workbookYears);
+    const nextYearState = nextYearStates[year];
+
+    setYearStates(nextYearStates);
     setActiveYear(year);
     loadWorkbookYearState(nextYearState);
   }
@@ -277,20 +319,19 @@ export function WorkbookApp() {
   function createNextWorkbookYear() {
     const nextYear = Math.max(...workbookYears) + 1;
     const currentState = getCurrentWorkbookYearState();
-    const nextYearState = yearStates[nextYear] ?? createEmptyWorkbookYearState();
-
-    setYearStates((currentStates) => ({
-      ...currentStates,
+    const nextWorkbookYears = workbookYears.includes(nextYear)
+      ? workbookYears
+      : [...workbookYears, nextYear].sort((first, second) => first - second);
+    const nextYearStates = syncCarryForwardAcrossYears({
+      ...yearStates,
       [activeYear]: currentState,
-      [nextYear]: nextYearState
-    }));
-    setWorkbookYears((currentYears) =>
-      currentYears.includes(nextYear)
-        ? currentYears
-        : [...currentYears, nextYear].sort((first, second) => first - second)
-    );
+      [nextYear]: yearStates[nextYear] ?? createEmptyWorkbookYearState()
+    }, nextWorkbookYears);
+
+    setYearStates(nextYearStates);
+    setWorkbookYears(nextWorkbookYears);
     setActiveYear(nextYear);
-    loadWorkbookYearState(nextYearState);
+    loadWorkbookYearState(nextYearStates[nextYear]);
   }
 
   function deleteEmptyWorkbooks() {
@@ -609,6 +650,12 @@ export function WorkbookApp() {
     ]);
   }
 
+  function updateStockPrice(input: StockPriceEntry) {
+    setStockPrices((currentRows) =>
+      currentRows.map((row) => (row.id === input.id ? input : row))
+    );
+  }
+
   function addStockDividend(input: Omit<StockDividendEntry, "id">) {
     setStockDividends((currentRows) => [
       ...currentRows,
@@ -743,7 +790,8 @@ export function WorkbookApp() {
       findCrossTabTransactionCell(
         transactionCell,
         transactionLinkedTabId,
-        presetRows
+        presetRows,
+        tabs
       ) ?? findLinkedPresetCell(transactionCell, presetRows);
     const linkedKey = linkedCell
       ? createCellKey(
@@ -889,6 +937,19 @@ export function WorkbookApp() {
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-950">
+      {loadStatus === "loading" ? (
+        <div className="border-b border-blue-300 bg-blue-50 px-4 py-2 text-sm text-blue-900">
+          Loading saved workbook. Autosave remains disabled until loading succeeds.
+        </div>
+      ) : null}
+      {persistenceError ? (
+        <div
+          className="border-b border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-900"
+          role="alert"
+        >
+          {persistenceError} Your current screen will not overwrite saved data.
+        </div>
+      ) : null}
       <div className="grid min-h-screen lg:grid-cols-[280px_1fr]">
         <aside className="border-r border-slate-300 bg-white">
           <div className="border-b border-slate-300 p-4">
@@ -898,6 +959,9 @@ export function WorkbookApp() {
             <h1 className="mt-1 text-xl font-semibold">
               {activeYear} Workbook
             </h1>
+            {accountControls ? (
+              <div className="mt-2 text-xs text-slate-600">{accountControls}</div>
+            ) : null}
           </div>
 
           <nav className="p-3">
@@ -1108,6 +1172,7 @@ export function WorkbookApp() {
                 onAddStockPrice={addStockPrice}
                 onAddStock={addStock}
                 onAddStockTransaction={addStockTransaction}
+                onUpdateStockPrice={updateStockPrice}
                 onUpdateStockTransaction={updateStockTransaction}
                 stocks={stockRows}
                 stockDividends={stockDividends}
@@ -1383,10 +1448,37 @@ function getTabNameFromTableId(tableId: string, tabs: WorkbookTab[]) {
 function findCrossTabTransactionCell(
   input: TransactionCell,
   linkedTabId: string,
-  presetRows: PresetRow[]
+  presetRows: PresetRow[],
+  tabs: WorkbookTab[]
 ) {
   if (!linkedTabId) {
     return null;
+  }
+
+  const creditCardTabId = getCreditCardVariableTabId(input.tableId);
+
+  if (creditCardTabId) {
+    const linkedTab = tabs.find((tab) => tab.id === linkedTabId);
+
+    if (
+      linkedTab?.kind !== "normal" ||
+      linkedTab.category !== "Wallets" ||
+      input.rowIndex < 0 ||
+      input.rowIndex >= DAY_ROW_COUNT
+    ) {
+      return null;
+    }
+
+    const targetPresetCount = getPresetRowsForTable(
+      presetRows,
+      linkedTabId,
+      "debit"
+    ).length;
+
+    return {
+      rowIndex: targetPresetCount + input.rowIndex,
+      tableId: `${linkedTabId}:debit`
+    };
   }
 
   const sourceTableType = getNormalTableType(input.tableId);
@@ -1426,6 +1518,18 @@ function getAvailableTransactionTargetTabs(
   tabs: WorkbookTab[],
   presetRows: PresetRow[]
 ) {
+  const creditCardTabId = getCreditCardVariableTabId(input.tableId);
+
+  if (creditCardTabId) {
+    if (input.rowIndex < 0 || input.rowIndex >= DAY_ROW_COUNT) {
+      return [];
+    }
+
+    return tabs.filter(
+      (tab) => tab.kind === "normal" && tab.category === "Wallets"
+    );
+  }
+
   const sourceTableType = getNormalTableType(input.tableId);
   const sourceTabId = getNormalTableTabId(input.tableId);
 
@@ -1447,6 +1551,14 @@ function getAvailableTransactionTargetTabs(
   return tabs.filter(
     (tab) => tab.kind === "normal" && tab.id !== sourceTabId
   );
+}
+
+function getCreditCardVariableTabId(tableId: string) {
+  if (!tableId.endsWith(":variable-expenses")) {
+    return null;
+  }
+
+  return tableId.slice(0, -":variable-expenses".length);
 }
 
 function getNormalTableTabId(tableId: string) {
@@ -1478,6 +1590,222 @@ function findTransactionKeyById(
       rows.some((row) => row.id === transactionId)
     )?.[0] ?? null
   );
+}
+
+function syncCarryForwardAcrossYears(
+  yearStates: Record<number, WorkbookYearState>,
+  workbookYears: number[]
+) {
+  const sortedYears = [...workbookYears].sort((first, second) => first - second);
+  const nextYearStates: Record<number, WorkbookYearState> = { ...yearStates };
+
+  sortedYears.forEach((year, index) => {
+    if (index === 0) {
+      nextYearStates[year] =
+        nextYearStates[year] ?? createEmptyWorkbookYearState();
+      return;
+    }
+
+    const previousYear = sortedYears[index - 1];
+    const previousState =
+      nextYearStates[previousYear] ?? createEmptyWorkbookYearState();
+    const currentState = nextYearStates[year] ?? createEmptyWorkbookYearState();
+
+    nextYearStates[year] = applyCarryForwardToYear(
+      previousState,
+      currentState
+    );
+  });
+
+  return nextYearStates;
+}
+
+function applyCarryForwardToYear(
+  previousState: WorkbookYearState,
+  targetState: WorkbookYearState
+): WorkbookYearState {
+  const previousDisplayValues = buildDisplayCellValues({
+    cellValues: previousState.cellValues,
+    fixedExpenseRows: previousState.fixedExpenseRows,
+    fixedExpenseSubRows: previousState.fixedExpenseSubRows,
+    presetRows: previousState.presetRows,
+    stockPrices: previousState.stockPrices,
+    stockRows: previousState.stockRows,
+    stockTransactions: previousState.stockTransactions,
+    tabs: previousState.tabs
+  });
+  const nextTabs = mergeRowsById(targetState.tabs, previousState.tabs);
+  const nextCellValues = { ...targetState.cellValues };
+  const nextStockTransactions = carryForwardInvestmentTransactions(
+    previousState,
+    targetState.stockTransactions
+  );
+  const nextStockPrices = carryForwardInvestmentPrices(
+    previousState,
+    targetState.stockPrices
+  );
+
+  previousState.tabs.forEach((tab) => {
+    if (tab.kind === "normal") {
+      const closingBalance = parseAmount(
+        previousDisplayValues[
+          createCellKey(`${tab.id}:overview`, 3, LAST_AMOUNT_COLUMN)
+        ]
+      );
+
+      nextCellValues[
+        createCellKey(`${tab.id}:overview`, 0, FIRST_AMOUNT_COLUMN)
+      ] = formatAmountTotal(closingBalance);
+    }
+
+    if (tab.kind === "credit-card") {
+      const carriedForward = parseAmount(
+        previousDisplayValues[
+          createCellKey(
+            `${tab.id}:credit-card-summary`,
+            6,
+            LAST_AMOUNT_COLUMN
+          )
+        ]
+      );
+
+      nextCellValues[
+        createCellKey(
+          `${tab.id}:credit-card-summary`,
+          2,
+          FIRST_AMOUNT_COLUMN
+        )
+      ] = formatAmountTotal(carriedForward);
+    }
+  });
+
+  return {
+    ...targetState,
+    cellValues: nextCellValues,
+    fixedExpenseRows: mergeRowsById(
+      targetState.fixedExpenseRows,
+      previousState.fixedExpenseRows
+    ),
+    fixedExpenseSubRows: mergeRowsById(
+      targetState.fixedExpenseSubRows,
+      previousState.fixedExpenseSubRows
+    ),
+    presetRows: mergeRowsById(targetState.presetRows, previousState.presetRows),
+    stockPrices: nextStockPrices,
+    stockRows: mergeRowsById(targetState.stockRows, previousState.stockRows),
+    stockTransactions: nextStockTransactions,
+    tabs: nextTabs
+  };
+}
+
+function carryForwardInvestmentTransactions(
+  previousState: WorkbookYearState,
+  targetTransactions: StockTransactionEntry[]
+) {
+  let nextTransactions = [...targetTransactions];
+
+  previousState.stockRows.forEach((stock) => {
+    const stockTransactions = previousState.stockTransactions.filter(
+      (entry) => entry.stockId === stock.id && entry.columnIndex <= LAST_MONTH_COLUMN
+    );
+    const quantity = stockTransactions.reduce(
+      (sum, entry) => sum + parseAmount(entry.quantity),
+      0
+    );
+    const totalCost = stockTransactions.reduce(
+      (sum, entry) => sum + parseAmount(entry.quantity) * parseAmount(entry.price),
+      0
+    );
+    const averagePrice = quantity ? totalCost / quantity : 0;
+    const carryForwardId = createCarryForwardStockTransactionId(stock.id);
+
+    nextTransactions = nextTransactions.filter(
+      (entry) => entry.id !== carryForwardId
+    );
+
+    if (!quantity) {
+      return;
+    }
+
+    nextTransactions = [
+      ...nextTransactions,
+      {
+        columnIndex: FIRST_AMOUNT_COLUMN,
+        date: "",
+        id: carryForwardId,
+        price: formatAmountTotal(averagePrice),
+        quantity: formatAmountTotal(quantity),
+        stockId: stock.id
+      }
+    ];
+  });
+
+  return nextTransactions;
+}
+
+function carryForwardInvestmentPrices(
+  previousState: WorkbookYearState,
+  targetPrices: StockPriceEntry[]
+) {
+  let nextPrices = [...targetPrices];
+
+  previousState.stockRows.forEach((stock) => {
+    const latestMarketPrice = previousState.stockPrices
+      .filter(
+        (entry) =>
+          entry.stockId === stock.id && entry.columnIndex <= LAST_MONTH_COLUMN
+      )
+      .sort((first, second) => first.columnIndex - second.columnIndex)
+      .at(-1)?.price;
+    const latestPurchasePrice = previousState.stockTransactions
+      .filter(
+        (entry) =>
+          entry.stockId === stock.id && entry.columnIndex <= LAST_MONTH_COLUMN
+      )
+      .sort((first, second) => first.columnIndex - second.columnIndex)
+      .at(-1)?.price;
+    const price = latestMarketPrice ?? latestPurchasePrice;
+    const carryForwardId = createCarryForwardStockPriceId(stock.id);
+
+    nextPrices = nextPrices.filter((entry) => entry.id !== carryForwardId);
+
+    if (!price) {
+      return;
+    }
+
+    nextPrices = [
+      ...nextPrices,
+      {
+        columnIndex: FIRST_AMOUNT_COLUMN,
+        id: carryForwardId,
+        price,
+        stockId: stock.id
+      }
+    ];
+  });
+
+  return nextPrices;
+}
+
+function createCarryForwardStockTransactionId(stockId: string) {
+  return `${stockId}:carry-forward-opening`;
+}
+
+function createCarryForwardStockPriceId(stockId: string) {
+  return `${stockId}:carry-forward-price`;
+}
+
+function mergeRowsById<T extends { id: string }>(targetRows: T[], sourceRows: T[]) {
+  const rowMap = new Map(targetRows.map((row) => [row.id, row]));
+
+  sourceRows.forEach((sourceRow) => {
+    rowMap.set(sourceRow.id, {
+      ...rowMap.get(sourceRow.id),
+      ...sourceRow
+    });
+  });
+
+  return Array.from(rowMap.values());
 }
 
 function createEmptyWorkbookYearState(): WorkbookYearState {
@@ -1846,7 +2174,11 @@ function syncLinkedCreditCardStatementAmounts({
 
     displayValues[createCellKey(`${tabId}:credit`, rowIndex, columnIndex)] =
       displayValues[
-        createCellKey(`${linkedTab.id}:credit-card-summary`, 5, columnIndex)
+        createCellKey(
+          `${linkedTab.id}:credit-card-summary`,
+          5,
+          columnIndex - 1
+        )
       ] ?? "";
   });
 }
@@ -1883,22 +2215,38 @@ function calculateCreditCardTabValues(
       ]
     );
     const variableExpenses = variableTotal.total;
+    const openingBroughtForward = parseAmount(
+      displayValues[
+        createCellKey(`${tab.id}:credit-card-summary`, 2, FIRST_AMOUNT_COLUMN)
+      ]
+    );
     const broughtForward =
-      columnIndex === FIRST_AMOUNT_COLUMN ? 0 : previousCarriedForward;
+      columnIndex === FIRST_AMOUNT_COLUMN
+        ? openingBroughtForward
+        : previousCarriedForward;
     const rebate = parseAmount(
       displayValues[createCellKey(`${tab.id}:credit-card-summary`, 3, columnIndex)]
     );
-    const statementAmount = parseAmount(
-      displayValues[createCellKey(`${tab.id}:credit-card-summary`, 5, columnIndex)]
-    );
+    const previousMonthStatementAmount =
+      columnIndex > FIRST_AMOUNT_COLUMN
+        ? parseAmount(
+            displayValues[
+              createCellKey(
+                `${tab.id}:credit-card-summary`,
+                5,
+                columnIndex - 1
+              )
+            ]
+          )
+        : 0;
     const monthlyTotal = fixedExpenses + variableExpenses + broughtForward - rebate;
-    const carriedForward = monthlyTotal - statementAmount;
+    const carriedForward = monthlyTotal - previousMonthStatementAmount;
     const hasValue =
       fixedExpenses ||
       variableExpenses ||
       broughtForward ||
       rebate ||
-      statementAmount;
+      previousMonthStatementAmount;
 
     displayValues[createCellKey(`${tab.id}:credit-card-summary`, 0, columnIndex)] =
       fixedExpenses ? formatAmountTotal(fixedExpenses) : "";

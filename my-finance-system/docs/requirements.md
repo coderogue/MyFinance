@@ -312,6 +312,10 @@ The user must not edit stock quantity from the Stock Summary table.
 
 The user may click a month cell in the Stock Summary table to update the current market price for that stock and month.
 
+Previous current market price updates must be visible when the user clicks the same Stock Summary cell.
+
+The user must be able to edit a previous current market price update to correct typo or input mistakes.
+
 The Stock Summary table should calculate value as:
 
 ```text
@@ -323,6 +327,10 @@ If no market price has been entered in Stock Summary yet, the system may tempora
 Entering a current price in Stock Summary should not change the purchase price recorded in Stock Transactions.
 
 Its quantities must come from the Stock Transactions table by default.
+
+The Stock Summary, Stock Transactions, and Dividend tables should share the same row ordering.
+
+If the user sorts one table by description or by a month/value column, the other tables on that Stock or Managed Fund page should follow the same stock row order.
 
 Rows are user-defined stock counters.
 
@@ -470,10 +478,21 @@ Manual values:
 
 Statement Amount means the amount actually paid.
 
+Credit card spending is paid one month later.
+
+The Statement Amount entered for the previous month should be treated as the payment in the current month.
+
+Example:
+
+```text
+Jan Statement Amount is entered manually.
+Feb uses Jan Statement Amount as the amount paid.
+```
+
 Formula:
 
 ```text
-Carried Forward = Monthly Total - Statement Amount
+Carried Forward = Monthly Total - Previous Month Statement Amount
 ```
 
 Carry-forward rule:
@@ -610,6 +629,12 @@ Displayed total:
 
 The Variable Expenses table records non-recurring or daily credit card spending.
 
+When adding a Credit Card Variable Expense transaction, the user may choose a Wallet tab as the transaction point.
+
+If a Wallet tab is selected, the Credit Card Variable Expense transaction should create a matching DEBIT transaction in the selected Wallet tab on the same day and month.
+
+This represents spending through credit card first, with the wallet receiving the corresponding debit-side record.
+
 Rows:
 
 - Day 1
@@ -710,6 +735,14 @@ New active workbook year = 2027
 
 Each created year should maintain its own workbook state, including tabs, rows, cell values, transaction records, stock or managed fund records, and credit card data.
 
+Carry-forward is a core accounting requirement.
+
+When a new year is created, the system should copy the prior year's workbook structure into the new year and seed the new year's opening records from the prior year's calculated closing records.
+
+If a future workbook year already exists, changes made to the prior year should continue to update the future year's system-generated opening records.
+
+System-generated opening records should remain tied to the prior year's closing values unless the user explicitly changes the underlying prior-year records.
+
 Each year has:
 
 - Opening Balance
@@ -738,6 +771,13 @@ For stock tabs:
 
 ```text
 Next year Opening Balance quantity = Current year Closing Balance quantity
+```
+
+For stock and managed fund tabs:
+
+```text
+Next year Opening Balance quantity = Previous year final accumulated quantity
+Next year Opening Balance price = Previous year latest known market price, or latest purchase price if no market price exists
 ```
 
 ## 17. Core Interaction
