@@ -2227,26 +2227,19 @@ function calculateCreditCardTabValues(
     const rebate = parseAmount(
       displayValues[createCellKey(`${tab.id}:credit-card-summary`, 3, columnIndex)]
     );
-    const previousMonthStatementAmount =
-      columnIndex > FIRST_AMOUNT_COLUMN
-        ? parseAmount(
-            displayValues[
-              createCellKey(
-                `${tab.id}:credit-card-summary`,
-                5,
-                columnIndex - 1
-              )
-            ]
-          )
-        : 0;
+    const statementAmount = parseAmount(
+      displayValues[
+        createCellKey(`${tab.id}:credit-card-summary`, 5, columnIndex)
+      ]
+    );
     const monthlyTotal = fixedExpenses + variableExpenses + broughtForward - rebate;
-    const carriedForward = monthlyTotal - previousMonthStatementAmount;
+    const carriedForward = monthlyTotal - statementAmount;
     const hasValue =
       fixedExpenses ||
       variableExpenses ||
       broughtForward ||
       rebate ||
-      previousMonthStatementAmount;
+      statementAmount;
 
     displayValues[createCellKey(`${tab.id}:credit-card-summary`, 0, columnIndex)] =
       fixedExpenses ? formatAmountTotal(fixedExpenses) : "";

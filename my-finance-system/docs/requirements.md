@@ -478,21 +478,10 @@ Manual values:
 
 Statement Amount means the amount actually paid.
 
-Credit card spending is paid one month later.
-
-The Statement Amount entered for the previous month should be treated as the payment in the current month.
-
-Example:
-
-```text
-Jan Statement Amount is entered manually.
-Feb uses Jan Statement Amount as the amount paid.
-```
-
 Formula:
 
 ```text
-Carried Forward = Monthly Total - Previous Month Statement Amount
+Carried Forward = Monthly Total - Statement Amount
 ```
 
 Carry-forward rule:
