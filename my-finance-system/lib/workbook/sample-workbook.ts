@@ -302,6 +302,30 @@ export const normalColumns = [
   "Closing Balance"
 ];
 
+export const annualTotalColumns = [
+  "Description",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Annual Total"
+];
+
+export const annualTotalColumnIndexes = [
+  0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+];
+
+export const monthlyRecordColumns = annualTotalColumns.slice(0, -1);
+export const monthlyRecordColumnIndexes = annualTotalColumnIndexes.slice(0, -1);
+
 export const stockColumns = [
   "Description",
   "Opening Balance",

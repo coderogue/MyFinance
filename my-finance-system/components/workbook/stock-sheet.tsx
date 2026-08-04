@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { dividendColumns, stockColumns } from "@/lib/workbook/sample-workbook";
 import {
@@ -6,6 +6,7 @@ import {
   DIVIDEND_TOTAL_COLUMN,
   formatNumber,
   getDividendValue,
+  getManagedFundInvestedValue,
   getStockTransactionValue,
   getStockValuation,
   OPENING_COLUMN,
@@ -99,6 +100,7 @@ export function StockSheet({
     mode: "summary"
   });
   const instrumentLabel = category === "Managed Funds" ? "Managed Fund" : "Stock";
+  const isManagedFund = category === "Managed Funds";
   const dividendLabel = category === "Managed Funds" ? "Distribution" : "Dividend";
   const tabStocks = stocks.filter((stock) => stock.tabId === tabId);
   const tabStockIds = useMemo(
@@ -112,6 +114,12 @@ export function StockSheet({
     tabStockIds.has(entry.stockId)
   );
   const tabPrices = stockPrices.filter((entry) => tabStockIds.has(entry.stockId));
+
+  useEffect(() => {
+    const today = getLocalDateInputValue();
+    setTransactionDate((currentDate) => currentDate || today);
+    setDividendDate((currentDate) => currentDate || today);
+  }, []);
   const previousStockTransactions = activeCell
     ? tabTransactions.filter(
         (entry) =>
@@ -140,9 +148,10 @@ export function StockSheet({
         prices: tabPrices,
         sortState,
         stocks: tabStocks,
-        transactions: tabTransactions
+        transactions: tabTransactions,
+        useInvestedValue: isManagedFund
       }),
-    [sortState, tabDividends, tabPrices, tabStocks, tabTransactions]
+    [isManagedFund, sortState, tabDividends, tabPrices, tabStocks, tabTransactions]
   );
 
   function addStock() {
@@ -161,7 +170,7 @@ export function StockSheet({
       return;
     }
 
-    const cleanQuantity = formatNumber(quantity);
+    const cleanQuantity = isManagedFund ? "1.00" : formatNumber(quantity);
     const cleanPrice = formatNumber(price);
 
     if (!cleanQuantity || !cleanPrice) {
@@ -221,11 +230,12 @@ export function StockSheet({
   }
 
   function resetEntryForm() {
+    const today = getLocalDateInputValue();
     setActiveCell(null);
-    setTransactionDate("");
+    setTransactionDate(today);
     setQuantity("");
     setPrice("");
-    setDividendDate("");
+    setDividendDate(today);
     setDividendAmount("");
     cancelPriceEdit();
     cancelTransactionEdit();
@@ -273,8 +283,14 @@ export function StockSheet({
   function startTransactionEdit(entry: StockTransactionEntry) {
     setEditingTransactionId(entry.id);
     setEditingTransactionDate(entry.date);
-    setEditingQuantity(entry.quantity);
-    setEditingPrice(entry.price);
+    setEditingQuantity(isManagedFund ? "1.00" : entry.quantity);
+    setEditingPrice(
+      isManagedFund
+        ? formatNumber(
+            String(parseNumber(entry.quantity) * parseNumber(entry.price))
+          )
+        : entry.price
+    );
   }
 
   function cancelTransactionEdit() {
@@ -285,7 +301,7 @@ export function StockSheet({
   }
 
   function saveTransactionEdit(entry: StockTransactionEntry) {
-    const cleanQuantity = formatNumber(editingQuantity);
+    const cleanQuantity = isManagedFund ? "1.00" : formatNumber(editingQuantity);
     const cleanPrice = formatNumber(editingPrice);
 
     if (!cleanQuantity || !cleanPrice) {
@@ -307,7 +323,7 @@ export function StockSheet({
       <div>
         <h1 className="text-2xl font-semibold text-slate-950">{name}</h1>
         <p className="mt-1 text-sm text-slate-600">
-          {instrumentLabel} tab: valuation summary, transactions, and{" "}
+          {instrumentLabel} tab: {isManagedFund ? "cumulative invested value" : "valuation"} summary, transactions, and{" "}
           {dividendLabel.toLowerCase()}s.
         </p>
       </div>
@@ -330,11 +346,22 @@ export function StockSheet({
       <StockGrid
         columns={stockColumns}
         getValue={(stock, columnIndex) =>
-          getStockValuation(stock.id, columnIndex, tabTransactions, tabPrices)
+          isManagedFund
+            ? getManagedFundInvestedValue(
+                stock.id,
+                columnIndex,
+                tabTransactions
+              )
+            : getStockValuation(
+                stock.id,
+                columnIndex,
+                tabTransactions,
+                tabPrices
+              )
         }
         lockedColumnIndex={CLOSING_COLUMN}
         onSort={(columnIndex) => handleSort("summary", columnIndex)}
-        onCellClick={(stock, columnIndex) => {
+        onCellClick={isManagedFund ? undefined : (stock, columnIndex) => {
           if (columnIndex === CLOSING_COLUMN) {
             return;
           }
@@ -349,7 +376,7 @@ export function StockSheet({
         }}
         sortState={sortState.mode === "summary" ? sortState : undefined}
         stocks={sortedStocks}
-        title={`${instrumentLabel} Summary`}
+        title={isManagedFund ? "Managed Fund Invested Value Summary" : "Stock Summary"}
         tone="slate"
       />
 
@@ -463,18 +490,20 @@ export function StockSheet({
                   value={transactionDate}
                 />
               ) : null}
-              <input
-                className="border border-slate-300 px-3 py-2 text-sm"
-                inputMode="decimal"
-                onChange={(event) => setQuantity(event.target.value)}
-                placeholder="Quantity bought / quantity at hand"
-                value={quantity}
-              />
+              {!isManagedFund ? (
+                <input
+                  className="border border-slate-300 px-3 py-2 text-sm"
+                  inputMode="decimal"
+                  onChange={(event) => setQuantity(event.target.value)}
+                  placeholder="Quantity bought / quantity at hand"
+                  value={quantity}
+                />
+              ) : null}
               <input
                 className="border border-slate-300 px-3 py-2 text-sm"
                 inputMode="decimal"
                 onChange={(event) => setPrice(event.target.value)}
-                placeholder={`Price per ${instrumentLabel.toLowerCase()}`}
+                placeholder={isManagedFund ? "Investment amount" : `Price per ${instrumentLabel.toLowerCase()}`}
                 value={price}
               />
               <button
@@ -491,6 +520,7 @@ export function StockSheet({
                   quantity: editingQuantity
                 }}
                 entries={previousStockTransactions}
+                isManagedFund={isManagedFund}
                 onCancelEdit={cancelTransactionEdit}
                 onChangeDate={setEditingTransactionDate}
                 onChangePrice={setEditingPrice}
@@ -527,6 +557,12 @@ export function StockSheet({
       ) : null}
     </div>
   );
+}
+
+function getLocalDateInputValue() {
+  const now = new Date();
+  const timezoneOffset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - timezoneOffset).toISOString().slice(0, 10);
 }
 
 function PreviousPriceEntries({
@@ -605,6 +641,7 @@ function PreviousPriceEntries({
 function PreviousStockTransactionEntries({
   editingEntry,
   entries,
+  isManagedFund,
   onCancelEdit,
   onChangeDate,
   onChangePrice,
@@ -619,6 +656,7 @@ function PreviousStockTransactionEntries({
     quantity: string;
   };
   entries: StockTransactionEntry[];
+  isManagedFund: boolean;
   onCancelEdit: () => void;
   onChangeDate: (value: string) => void;
   onChangePrice: (value: string) => void;
@@ -646,18 +684,20 @@ function PreviousStockTransactionEntries({
                   entry.date || "Opening"
                 )}
               </td>
-              <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-                {isEditing ? (
-                  <input
-                    className="w-full border border-slate-300 px-2 py-1 text-right"
-                    inputMode="decimal"
-                    onChange={(event) => onChangeQuantity(event.target.value)}
-                    value={editingEntry.quantity}
-                  />
-                ) : (
-                  entry.quantity
-                )}
-              </td>
+              {!isManagedFund ? (
+                <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
+                  {isEditing ? (
+                    <input
+                      className="w-full border border-slate-300 px-2 py-1 text-right"
+                      inputMode="decimal"
+                      onChange={(event) => onChangeQuantity(event.target.value)}
+                      value={editingEntry.quantity}
+                    />
+                  ) : (
+                    entry.quantity
+                  )}
+                </td>
+              ) : null}
               <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
                 {isEditing ? (
                   <input
@@ -667,19 +707,27 @@ function PreviousStockTransactionEntries({
                     value={editingEntry.price}
                   />
                 ) : (
-                  entry.price
+                  isManagedFund
+                    ? formatNumber(
+                        String(
+                          parseNumber(entry.quantity) * parseNumber(entry.price)
+                        )
+                      )
+                    : entry.price
                 )}
               </td>
-              <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
-                {formatNumber(
-                  String(
-                    parseNumber(
-                      isEditing ? editingEntry.quantity : entry.quantity
-                    ) *
-                      parseNumber(isEditing ? editingEntry.price : entry.price)
-                  )
-                )}
-              </td>
+              {!isManagedFund ? (
+                <td className="border border-slate-200 px-2 py-2 text-right tabular-nums">
+                  {formatNumber(
+                    String(
+                      parseNumber(
+                        isEditing ? editingEntry.quantity : entry.quantity
+                      ) *
+                        parseNumber(isEditing ? editingEntry.price : entry.price)
+                    )
+                  )}
+                </td>
+              ) : null}
               <td className="border border-slate-200 px-2 py-2">
                 {isEditing ? (
                   <div className="flex gap-2">
@@ -709,7 +757,7 @@ function PreviousStockTransactionEntries({
           );
         })
       ) : (
-        <EmptyPreviousEntries colSpan={5} />
+        <EmptyPreviousEntries colSpan={isManagedFund ? 3 : 5} />
       )}
     </PreviousEntries>
   );

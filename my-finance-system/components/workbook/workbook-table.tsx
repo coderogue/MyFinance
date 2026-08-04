@@ -1,6 +1,7 @@
 export function WorkbookTable({
   title,
   columns,
+  columnIndexes,
   getCellMode,
   onCellChange,
   onTransactionCellOpen,
@@ -12,6 +13,7 @@ export function WorkbookTable({
 }: {
   title: string;
   columns: string[];
+  columnIndexes?: number[];
   getCellMode?: (input: {
     cell: string;
     columnIndex: number;
@@ -38,6 +40,12 @@ export function WorkbookTable({
   tone?: "slate" | "teal" | "blue" | "green";
   values?: Record<string, string>;
 }) {
+  const visibleColumnIndexes =
+    columnIndexes ?? columns.map((_, columnIndex) => columnIndex);
+
+  if (visibleColumnIndexes.length !== columns.length) {
+    throw new Error("WorkbookTable columns and columnIndexes must have equal lengths.");
+  }
   const headerTone = {
     slate: "bg-slate-100 text-slate-700",
     teal: "bg-teal-600 text-black",
@@ -97,15 +105,16 @@ export function WorkbookTable({
 
               return (
                 <tr key={rowKey} className={isTotal ? totalTone : ""}>
-                  {row.map((cell, index) => {
-                    const key = `${tableId}:${rowIndex}:${index}`;
+                  {visibleColumnIndexes.map((columnIndex, visibleIndex) => {
+                    const cell = row[columnIndex] ?? "";
+                    const key = `${tableId}:${rowIndex}:${columnIndex}`;
                     const value = values[key] ?? cell;
                     const mode =
-                      index === 0
+                      columnIndex === 0
                         ? "display"
                         : getCellMode?.({
                             cell,
-                            columnIndex: index,
+                            columnIndex,
                             isTotal,
                             row,
                             rowIndex
@@ -113,9 +122,9 @@ export function WorkbookTable({
 
                     return (
                       <td
-                        key={`${row[0]}-${index}`}
+                        key={`${row[0]}-${columnIndex}`}
                         className={`border-b border-r border-slate-200 px-2 py-1.5 text-xs ${
-                          index <= 1
+                          visibleIndex === 0
                             ? "text-center font-semibold text-slate-800"
                             : "text-right font-medium tabular-nums"
                         } ${isTotal ? "font-bold" : ""}`}
@@ -125,7 +134,7 @@ export function WorkbookTable({
                             className="w-full min-w-20 bg-transparent text-right outline-none focus:bg-white focus:ring-1 focus:ring-slate-400"
                             onBlur={(event) =>
                               onCellChange?.({
-                                columnIndex: index,
+                                columnIndex,
                                 commit: true,
                                 rowIndex,
                                 tableId,
@@ -134,7 +143,7 @@ export function WorkbookTable({
                             }
                             onChange={(event) =>
                               onCellChange?.({
-                                columnIndex: index,
+                                columnIndex,
                                 commit: false,
                                 rowIndex,
                                 tableId,
@@ -148,10 +157,10 @@ export function WorkbookTable({
                             className="min-h-5 w-full min-w-20 text-right hover:bg-slate-100 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400"
                             onClick={() =>
                               onTransactionCellOpen?.({
-                                columnIndex: index,
+                                columnIndex,
                                 rowIndex,
                                 tableId,
-                                title: `${title} / ${row[0]} / ${columns[index]}`
+                                title: `${title} / ${row[0]} / ${columns[visibleIndex]}`
                               })
                             }
                           >

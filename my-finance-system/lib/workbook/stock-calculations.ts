@@ -23,13 +23,15 @@ export function sortStocks({
   prices,
   sortState,
   stocks,
-  transactions
+  transactions,
+  useInvestedValue = false
 }: {
   dividends: StockDividendEntry[];
   prices: StockPriceEntry[];
   sortState: StockSortState;
   stocks: StockRow[];
   transactions: StockTransactionEntry[];
+  useInvestedValue?: boolean;
 }) {
   return [...stocks].sort((firstStock, secondStock) => {
     const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
@@ -43,18 +45,41 @@ export function sortStocks({
       prices,
       sortState,
       stock: firstStock,
-      transactions
+      transactions,
+      useInvestedValue
     });
     const secondValue = getSortableStockValue({
       dividends,
       prices,
       sortState,
       stock: secondStock,
-      transactions
+      transactions,
+      useInvestedValue
     });
 
     return (firstValue - secondValue) * directionMultiplier;
   });
+}
+
+export function getManagedFundInvestedValue(
+  stockId: string,
+  columnIndex: number,
+  transactions: StockTransactionEntry[]
+) {
+  const maxColumnIndex =
+    columnIndex === CLOSING_COLUMN ? LAST_MONTH_COLUMN : columnIndex;
+  const total = transactions
+    .filter(
+      (entry) =>
+        entry.stockId === stockId && entry.columnIndex <= maxColumnIndex
+    )
+    .reduce(
+      (sum, entry) =>
+        sum + parseNumber(entry.quantity) * parseNumber(entry.price),
+      0
+    );
+
+  return total ? formatNumber(String(total)) : "";
 }
 
 export function getStockValuation(
@@ -160,17 +185,30 @@ function getSortableStockValue({
   prices,
   sortState,
   stock,
-  transactions
+  transactions,
+  useInvestedValue
 }: {
   dividends: StockDividendEntry[];
   prices: StockPriceEntry[];
   sortState: StockSortState;
   stock: StockRow;
   transactions: StockTransactionEntry[];
+  useInvestedValue: boolean;
 }) {
   if (sortState.mode === "summary") {
     return parseNumber(
-      getStockValuation(stock.id, sortState.columnIndex, transactions, prices)
+      useInvestedValue
+        ? getManagedFundInvestedValue(
+            stock.id,
+            sortState.columnIndex,
+            transactions
+          )
+        : getStockValuation(
+            stock.id,
+            sortState.columnIndex,
+            transactions,
+            prices
+          )
     );
   }
   if (sortState.mode === "transactions") {

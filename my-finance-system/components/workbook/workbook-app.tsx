@@ -1659,7 +1659,7 @@ function applyCarryForwardToYear(
     }
 
     if (tab.kind === "credit-card") {
-      const carriedForward = parseAmount(
+      const closingCarriedForward = parseAmount(
         previousDisplayValues[
           createCellKey(
             `${tab.id}:credit-card-summary`,
@@ -1675,7 +1675,7 @@ function applyCarryForwardToYear(
           2,
           FIRST_AMOUNT_COLUMN
         )
-      ] = formatAmountTotal(carriedForward);
+      ] = formatAmountTotal(closingCarriedForward);
     }
   });
 
@@ -1705,6 +1705,8 @@ function carryForwardInvestmentTransactions(
   let nextTransactions = [...targetTransactions];
 
   previousState.stockRows.forEach((stock) => {
+    const stockTab = previousState.tabs.find((tab) => tab.id === stock.tabId);
+    const isManagedFund = stockTab?.category === "Managed Funds";
     const stockTransactions = previousState.stockTransactions.filter(
       (entry) => entry.stockId === stock.id && entry.columnIndex <= LAST_MONTH_COLUMN
     );
@@ -1723,7 +1725,7 @@ function carryForwardInvestmentTransactions(
       (entry) => entry.id !== carryForwardId
     );
 
-    if (!quantity) {
+    if (isManagedFund ? !totalCost : !quantity) {
       return;
     }
 
@@ -1733,8 +1735,8 @@ function carryForwardInvestmentTransactions(
         columnIndex: FIRST_AMOUNT_COLUMN,
         date: "",
         id: carryForwardId,
-        price: formatAmountTotal(averagePrice),
-        quantity: formatAmountTotal(quantity),
+        price: formatAmountTotal(isManagedFund ? totalCost : averagePrice),
+        quantity: formatAmountTotal(isManagedFund ? 1 : quantity),
         stockId: stock.id
       }
     ];
@@ -1918,8 +1920,8 @@ function buildDisplayCellValues({
     const subTotalRowIndex = subRows.length;
 
     for (
-      let columnIndex = FIRST_AMOUNT_COLUMN;
-      columnIndex <= LAST_AMOUNT_COLUMN;
+      let columnIndex = FIRST_MONTH_COLUMN;
+      columnIndex <= LAST_MONTH_COLUMN;
       columnIndex += 1
     ) {
       let total = 0;
@@ -1936,6 +1938,11 @@ function buildDisplayCellValues({
       displayValues[createCellKey(subTableId, subTotalRowIndex, columnIndex)] =
         hasValue ? formatAmountTotal(total) : "";
     }
+
+    subRows.forEach((_, rowIndex) => {
+      setAnnualTotal(displayValues, subTableId, rowIndex);
+    });
+    setAnnualTotal(displayValues, subTableId, subTotalRowIndex);
   }
 
   const fixedExpenseRowsByTab = fixedExpenseRows.reduce<
@@ -1950,8 +1957,8 @@ function buildDisplayCellValues({
     const fixedExpensesTotalRowIndex = tabRows.length;
 
     for (
-      let columnIndex = FIRST_AMOUNT_COLUMN;
-      columnIndex <= LAST_AMOUNT_COLUMN;
+      let columnIndex = FIRST_MONTH_COLUMN;
+      columnIndex <= LAST_MONTH_COLUMN;
       columnIndex += 1
     ) {
       let tableTotal = 0;
@@ -1988,6 +1995,15 @@ function buildDisplayCellValues({
         )
       ] = tableHasValue ? formatAmountTotal(tableTotal) : "";
     }
+
+    tabRows.forEach((_, rowIndex) => {
+      setAnnualTotal(displayValues, fixedExpensesTableId, rowIndex);
+    });
+    setAnnualTotal(
+      displayValues,
+      fixedExpensesTableId,
+      fixedExpensesTotalRowIndex
+    );
   });
 
   tabs
@@ -2086,7 +2102,7 @@ function calculateNormalTabValues(
 
   for (
     let columnIndex = FIRST_AMOUNT_COLUMN;
-    columnIndex <= LAST_AMOUNT_COLUMN;
+    columnIndex <= LAST_MONTH_COLUMN;
     columnIndex += 1
   ) {
     syncLinkedCreditCardStatementAmounts({
@@ -2124,7 +2140,7 @@ function calculateNormalTabValues(
 
   for (
     let columnIndex = FIRST_AMOUNT_COLUMN;
-    columnIndex <= LAST_AMOUNT_COLUMN;
+    columnIndex <= LAST_MONTH_COLUMN;
     columnIndex += 1
   ) {
     const broughtForward =
@@ -2149,6 +2165,13 @@ function calculateNormalTabValues(
       broughtForward || debit || credit ? formatAmountTotal(balance) : "";
 
     previousBalance = balance;
+  }
+
+  setClosingBalance(displayValues, `${tab.id}:overview`, 3);
+  for (let rowIndex = 0; rowIndex < 3; rowIndex += 1) {
+    displayValues[
+      createCellKey(`${tab.id}:overview`, rowIndex, LAST_AMOUNT_COLUMN)
+    ] = "";
   }
 }
 
@@ -2192,7 +2215,7 @@ function calculateCreditCardTabValues(
 
   for (
     let columnIndex = FIRST_AMOUNT_COLUMN;
-    columnIndex <= LAST_AMOUNT_COLUMN;
+    columnIndex <= LAST_MONTH_COLUMN;
     columnIndex += 1
   ) {
     const variableTotal = sumTableColumn(
@@ -2254,6 +2277,67 @@ function calculateCreditCardTabValues(
 
     previousCarriedForward = carriedForward;
   }
+
+  setClosingBalance(displayValues, `${tab.id}:credit-card-summary`, 6);
+  for (let rowIndex = 0; rowIndex < 6; rowIndex += 1) {
+    displayValues[
+      createCellKey(
+        `${tab.id}:credit-card-summary`,
+        rowIndex,
+        LAST_AMOUNT_COLUMN
+      )
+    ] = "";
+  }
+}
+
+function setClosingBalance(
+  displayValues: CellValueMap,
+  tableId: string,
+  rowIndex: number
+) {
+  let closingValue = "";
+
+  for (
+    let columnIndex = LAST_MONTH_COLUMN;
+    columnIndex >= FIRST_AMOUNT_COLUMN;
+    columnIndex -= 1
+  ) {
+    const value = displayValues[createCellKey(tableId, rowIndex, columnIndex)];
+
+    if (value) {
+      closingValue = value;
+      break;
+    }
+  }
+
+  displayValues[createCellKey(tableId, rowIndex, LAST_AMOUNT_COLUMN)] =
+    closingValue;
+}
+
+function setAnnualTotal(
+  displayValues: CellValueMap,
+  tableId: string,
+  rowIndex: number
+) {
+  let total = 0;
+  let hasValue = false;
+
+  for (
+    let columnIndex = FIRST_MONTH_COLUMN;
+    columnIndex <= LAST_MONTH_COLUMN;
+    columnIndex += 1
+  ) {
+    const value = displayValues[createCellKey(tableId, rowIndex, columnIndex)];
+
+    if (value) {
+      hasValue = true;
+      total += parseAmount(value);
+    }
+  }
+
+  displayValues[createCellKey(tableId, rowIndex, LAST_AMOUNT_COLUMN)] = hasValue
+    ? formatAmountTotal(total)
+    : "";
 }
 
 function calculateSummaryValues({
@@ -2394,17 +2478,19 @@ function getTabSummaryValue({
   tab: WorkbookTab;
 }) {
   const workbookColumnIndex = summaryColumnIndex - 1;
+  const balanceColumnIndex =
+    summaryColumnIndex === 15 ? LAST_AMOUNT_COLUMN : workbookColumnIndex;
 
   if (tab.kind === "normal") {
     return parseAmount(
-      displayValues[createCellKey(`${tab.id}:overview`, 3, workbookColumnIndex)]
+      displayValues[createCellKey(`${tab.id}:overview`, 3, balanceColumnIndex)]
     );
   }
 
   if (tab.kind === "credit-card") {
     return parseAmount(
       displayValues[
-        createCellKey(`${tab.id}:credit-card-summary`, 6, workbookColumnIndex)
+        createCellKey(`${tab.id}:credit-card-summary`, 6, balanceColumnIndex)
       ]
     );
   }

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   getNormalTableRows,
+  monthlyRecordColumnIndexes,
+  monthlyRecordColumns,
   normalColumns,
   normalOverviewRows
 } from "@/lib/workbook/sample-workbook";
@@ -74,7 +76,8 @@ export function NormalTabSheet({
       />
 
       <PresetTableSection
-        columns={normalColumns}
+        columns={monthlyRecordColumns}
+        columnIndexes={monthlyRecordColumnIndexes}
         currentTabId={tabId}
         onCellChange={onCellChange}
         onTransactionCellOpen={onTransactionCellOpen}
@@ -90,7 +93,8 @@ export function NormalTabSheet({
       />
 
       <PresetTableSection
-        columns={normalColumns}
+        columns={monthlyRecordColumns}
+        columnIndexes={monthlyRecordColumnIndexes}
         currentTabId={tabId}
         onCellChange={onCellChange}
         onTransactionCellOpen={onTransactionCellOpen}
@@ -110,6 +114,7 @@ export function NormalTabSheet({
 
 function PresetTableSection({
   columns,
+  columnIndexes,
   currentTabId,
   onCellChange,
   onTransactionCellOpen,
@@ -124,6 +129,7 @@ function PresetTableSection({
   values
 }: {
   columns: string[];
+  columnIndexes: number[];
   currentTabId: string;
   onCellChange: (input: {
     columnIndex: number;
@@ -210,6 +216,7 @@ function PresetTableSection({
       <WorkbookTable
         title={title}
         columns={columns}
+        columnIndexes={columnIndexes}
         getCellMode={({ columnIndex, isTotal, rowIndex }) => {
           if (columnIndex === 0 || isTotal) {
             return "display";

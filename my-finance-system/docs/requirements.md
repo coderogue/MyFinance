@@ -129,8 +129,21 @@ Feb Brought Forward = Jan Total Balance
 Mar Brought Forward = Feb Total Balance
 ...
 Dec Brought Forward = Nov Total Balance
-Closing Balance = Dec Total Balance
+Year-end balance = Dec Total Balance
 ```
+
+The December year-end balance becomes the next year's Opening Balance and January Brought Forward amount.
+
+Table presentation rules:
+
+- Bank and Wallet Overview tables show Opening Balance, January through December, and Closing Balance.
+- Bank and Wallet Debit and Credit tables show January through December only.
+- Credit Card Summary shows Opening Balance, January through December, and Closing Balance.
+- Fixed Expenses and Fixed Expense subtables show January through December plus Annual Total.
+- Credit Card Variable Expenses show January through December only.
+- Annual Total is the sum of January through December and is never carried into another year.
+- Closing Balance uses the latest available monthly balance and is carried into the following year's Opening Balance.
+- Summary, Stock, and Managed Fund position tables retain Opening Balance and Closing Balance. Their Closing Balance is the December year-end position.
 
 ## 5. Normal Tab DEBIT Table
 
@@ -138,7 +151,6 @@ The DEBIT table records money coming into the tab.
 
 Columns:
 
-- Opening Balance
 - Jan
 - Feb
 - Mar
@@ -151,7 +163,6 @@ Columns:
 - Oct
 - Nov
 - Dec
-- Closing Balance
 
 Rows:
 
@@ -175,7 +186,6 @@ The CREDIT table records money going out of the tab.
 
 Columns:
 
-- Opening Balance
 - Jan
 - Feb
 - Mar
@@ -188,7 +198,6 @@ Columns:
 - Oct
 - Nov
 - Dec
-- Closing Balance
 
 Rows:
 
@@ -510,7 +519,6 @@ Examples:
 
 Columns:
 
-- Opening Balance
 - Jan
 - Feb
 - Mar
@@ -523,7 +531,7 @@ Columns:
 - Oct
 - Nov
 - Dec
-- Closing Balance
+- Annual Total
 
 Each fixed expense item can have a recurring monthly projected value.
 
@@ -557,9 +565,8 @@ The sub table allows multiple entries within one month.
 
 The parent fixed expense row still displays only the monthly total.
 
-The sub table should use the same yearly month-column layout as the fixed expense table:
+The sub table should use the same January-to-December plus Annual Total layout as the fixed expense table:
 
-- Opening Balance
 - Jan
 - Feb
 - Mar
@@ -572,7 +579,7 @@ The sub table should use the same yearly month-column layout as the fixed expens
 - Oct
 - Nov
 - Dec
-- Closing Balance
+- Annual Total
 
 The user should be able to add named sub rows.
 
@@ -768,6 +775,8 @@ For stock and managed fund tabs:
 Next year Opening Balance quantity = Previous year final accumulated quantity
 Next year Opening Balance price = Previous year latest known market price, or latest purchase price if no market price exists
 ```
+
+Managed Funds use a simplified contribution model. Users record only the date and amount invested; unit quantity and unit price are not shown. The Managed Fund Summary displays cumulative invested capital: Opening Balance plus all contributions through each month. Its Closing Balance is carried to the following year's Opening Balance. Stocks continue to use quantity and market-price valuation.
 
 ## 17. Core Interaction
 

@@ -1,9 +1,13 @@
 import { useState } from "react";
 import {
+  annualTotalColumnIndexes,
+  annualTotalColumns,
   creditCardColumns,
   creditCardSummaryRows,
   getFixedExpenseRows,
   getFixedExpenseSubTableRows,
+  monthlyRecordColumnIndexes,
+  monthlyRecordColumns,
   variableExpenseRows
 } from "@/lib/workbook/sample-workbook";
 import type {
@@ -13,6 +17,8 @@ import type {
   TransactionCell
 } from "@/lib/workbook/types";
 import { WorkbookTable } from "./workbook-table";
+
+const CLOSING_COLUMN = 14;
 
 export function CreditCardSheet({
   fixedExpenseRows,
@@ -74,7 +80,7 @@ export function CreditCardSheet({
         title="Credit Card Summary"
         columns={creditCardColumns}
         getCellMode={({ columnIndex, rowIndex }) => {
-          if (columnIndex === 0) {
+          if (columnIndex === 0 || columnIndex === CLOSING_COLUMN) {
             return "display";
           }
 
@@ -89,10 +95,16 @@ export function CreditCardSheet({
 
       <WorkbookTable
         title="Fixed Expenses"
-        columns={creditCardColumns}
-        getCellMode={({ isTotal, rowIndex }) => {
+        columns={annualTotalColumns}
+        columnIndexes={annualTotalColumnIndexes}
+        getCellMode={({ columnIndex, isTotal, rowIndex }) => {
           const row = tabFixedExpenseRows[rowIndex];
-          if (isTotal || !row || row.hasSubTable) {
+          if (
+            columnIndex === CLOSING_COLUMN ||
+            isTotal ||
+            !row ||
+            row.hasSubTable
+          ) {
             return "display";
           }
 
@@ -146,7 +158,8 @@ export function CreditCardSheet({
 
       <WorkbookTable
         title="Variable Expenses"
-        columns={creditCardColumns}
+        columns={monthlyRecordColumns}
+        columnIndexes={monthlyRecordColumnIndexes}
         getCellMode={({ isTotal }) => (isTotal ? "display" : "transaction")}
         onCellChange={onCellChange}
         onTransactionCellOpen={onTransactionCellOpen}
@@ -212,8 +225,11 @@ function FixedExpenseSubTable({
       </div>
       <WorkbookTable
         title={`Sub Table: ${fixedExpense.label}`}
-        columns={creditCardColumns}
-        getCellMode={({ isTotal }) => (isTotal ? "display" : "edit")}
+        columns={annualTotalColumns}
+        columnIndexes={annualTotalColumnIndexes}
+        getCellMode={({ columnIndex, isTotal }) =>
+          columnIndex === CLOSING_COLUMN || isTotal ? "display" : "edit"
+        }
         onCellChange={onCellChange}
         onTransactionCellOpen={onTransactionCellOpen}
         rows={tableRows}
