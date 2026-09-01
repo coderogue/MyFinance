@@ -1752,6 +1752,8 @@ function carryForwardInvestmentPrices(
   let nextPrices = [...targetPrices];
 
   previousState.stockRows.forEach((stock) => {
+    const stockTab = previousState.tabs.find((tab) => tab.id === stock.tabId);
+    const isManagedFund = stockTab?.category === "Managed Funds";
     const latestMarketPrice = previousState.stockPrices
       .filter(
         (entry) =>
@@ -1759,14 +1761,20 @@ function carryForwardInvestmentPrices(
       )
       .sort((first, second) => first.columnIndex - second.columnIndex)
       .at(-1)?.price;
-    const latestPurchasePrice = previousState.stockTransactions
+    const relevantTransactions = previousState.stockTransactions
       .filter(
         (entry) =>
           entry.stockId === stock.id && entry.columnIndex <= LAST_MONTH_COLUMN
       )
-      .sort((first, second) => first.columnIndex - second.columnIndex)
-      .at(-1)?.price;
-    const price = latestMarketPrice ?? latestPurchasePrice;
+      .sort((first, second) => first.columnIndex - second.columnIndex);
+    const latestPurchasePrice = relevantTransactions.at(-1)?.price;
+    const investedValue = relevantTransactions.reduce(
+      (sum, entry) =>
+        sum + parseAmount(entry.quantity) * parseAmount(entry.price),
+      0
+    );
+    const price = latestMarketPrice ??
+      (isManagedFund ? formatAmountTotal(investedValue) : latestPurchasePrice);
     const carryForwardId = createCarryForwardStockPriceId(stock.id);
 
     nextPrices = nextPrices.filter((entry) => entry.id !== carryForwardId);
@@ -2498,6 +2506,7 @@ function getTabSummaryValue({
   if (tab.kind === "stock") {
     return getInvestmentTabSummaryValue({
       columnIndex: workbookColumnIndex,
+      isManagedFund: tab.category === "Managed Funds",
       stockPrices,
       stockRows: stockRows.filter((row) => row.tabId === tab.id),
       stockTransactions
@@ -2509,11 +2518,13 @@ function getTabSummaryValue({
 
 function getInvestmentTabSummaryValue({
   columnIndex,
+  isManagedFund,
   stockPrices,
   stockRows,
   stockTransactions
 }: {
   columnIndex: number;
+  isManagedFund: boolean;
   stockPrices: StockPriceEntry[];
   stockRows: StockRow[];
   stockTransactions: StockTransactionEntry[];
@@ -2542,6 +2553,15 @@ function getInvestmentTabSummaryValue({
       .reverse()
       .find((entry) => parseAmount(entry.price) > 0)?.price;
     const price = parseAmount(latestMarketPrice ?? fallbackPurchasePrice);
+
+    if (isManagedFund) {
+      const investedValue = relevantTransactions.reduce(
+        (costSum, entry) =>
+          costSum + parseAmount(entry.quantity) * parseAmount(entry.price),
+        0
+      );
+      return sum + (latestMarketPrice ? parseAmount(latestMarketPrice) : investedValue);
+    }
 
     return sum + quantity * price;
   }, 0);

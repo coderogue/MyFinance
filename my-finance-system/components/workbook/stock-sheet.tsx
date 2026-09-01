@@ -6,7 +6,7 @@ import {
   DIVIDEND_TOTAL_COLUMN,
   formatNumber,
   getDividendValue,
-  getManagedFundInvestedValue,
+  getManagedFundMarketValue,
   getStockTransactionValue,
   getStockValuation,
   OPENING_COLUMN,
@@ -323,7 +323,7 @@ export function StockSheet({
       <div>
         <h1 className="text-2xl font-semibold text-slate-950">{name}</h1>
         <p className="mt-1 text-sm text-slate-600">
-          {instrumentLabel} tab: {isManagedFund ? "cumulative invested value" : "valuation"} summary, transactions, and{" "}
+          {instrumentLabel} tab: {isManagedFund ? "current market value" : "valuation"} summary, transactions, and{" "}
           {dividendLabel.toLowerCase()}s.
         </p>
       </div>
@@ -347,10 +347,11 @@ export function StockSheet({
         columns={stockColumns}
         getValue={(stock, columnIndex) =>
           isManagedFund
-            ? getManagedFundInvestedValue(
+            ? getManagedFundMarketValue(
                 stock.id,
                 columnIndex,
-                tabTransactions
+                tabTransactions,
+                tabPrices
               )
             : getStockValuation(
                 stock.id,
@@ -361,7 +362,7 @@ export function StockSheet({
         }
         lockedColumnIndex={CLOSING_COLUMN}
         onSort={(columnIndex) => handleSort("summary", columnIndex)}
-        onCellClick={isManagedFund ? undefined : (stock, columnIndex) => {
+        onCellClick={(stock, columnIndex) => {
           if (columnIndex === CLOSING_COLUMN) {
             return;
           }
@@ -371,12 +372,12 @@ export function StockSheet({
             mode: "price",
             stockId: stock.id,
             stockName: stock.label,
-            title: `${stock.label} / ${stockColumns[columnIndex]} Current Price`
+            title: `${stock.label} / ${stockColumns[columnIndex]} ${isManagedFund ? "Current Market Value" : "Current Price"}`
           });
         }}
         sortState={sortState.mode === "summary" ? sortState : undefined}
         stocks={sortedStocks}
-        title={isManagedFund ? "Managed Fund Invested Value Summary" : "Stock Summary"}
+        title={isManagedFund ? "Managed Fund Market Value Summary" : "Stock Summary"}
         tone="slate"
       />
 
@@ -438,7 +439,9 @@ export function StockSheet({
             <div>
               <h2 className="text-lg font-semibold">
                 {activeCell.mode === "price"
-                  ? "Current Stock Price"
+                  ? isManagedFund
+                    ? "Current Managed Fund Market Value"
+                    : "Current Stock Price"
                   : activeCell.mode === "stock"
                     ? `${instrumentLabel} Transaction`
                     : `${dividendLabel} Entry`}
@@ -459,14 +462,14 @@ export function StockSheet({
                 className="border border-slate-300 px-3 py-2 text-sm"
                 inputMode="decimal"
                 onChange={(event) => setPrice(event.target.value)}
-                placeholder={`Current price per ${instrumentLabel.toLowerCase()}`}
+                placeholder={isManagedFund ? "Current total market value" : `Current price per ${instrumentLabel.toLowerCase()}`}
                 value={price}
               />
               <button
                 className="border border-slate-950 bg-slate-950 px-3 py-2 text-sm text-white"
                 onClick={submitStockPrice}
               >
-                Update Current Price
+                Update Current {isManagedFund ? "Market Value" : "Price"}
               </button>
               <PreviousPriceEntries
                 editingEntry={{

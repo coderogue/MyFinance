@@ -82,6 +82,29 @@ export function getManagedFundInvestedValue(
   return total ? formatNumber(String(total)) : "";
 }
 
+export function getManagedFundMarketValue(
+  stockId: string,
+  columnIndex: number,
+  transactions: StockTransactionEntry[],
+  prices: StockPriceEntry[]
+) {
+  const maxColumnIndex =
+    columnIndex === CLOSING_COLUMN ? LAST_MONTH_COLUMN : columnIndex;
+  const latestMarketValue = prices
+    .filter(
+      (entry) =>
+        entry.stockId === stockId && entry.columnIndex <= maxColumnIndex
+    )
+    .sort((first, second) => first.columnIndex - second.columnIndex)
+    .at(-1)?.price;
+
+  return latestMarketValue ?? getManagedFundInvestedValue(
+    stockId,
+    columnIndex,
+    transactions
+  );
+}
+
 export function getStockValuation(
   stockId: string,
   columnIndex: number,
@@ -198,10 +221,11 @@ function getSortableStockValue({
   if (sortState.mode === "summary") {
     return parseNumber(
       useInvestedValue
-        ? getManagedFundInvestedValue(
+        ? getManagedFundMarketValue(
             stock.id,
             sortState.columnIndex,
-            transactions
+            transactions,
+            prices
           )
         : getStockValuation(
             stock.id,
